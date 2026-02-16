@@ -8,3 +8,18 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/airbnb
     enabled: true
+
+  - name: coinbase
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/coinbase
+    enabled: true
+
+  - name: doordash
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/doordashusa
+    enabled: true
+
+  - name: gitlab
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/gitlab
+    enabled: true
