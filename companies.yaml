@@ -1,0 +1,10 @@
+companies:
+  - name: anthropic
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/anthropic
+    enabled: true
+
+  - name: airbnb
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/airbnb
+    enabled: true
