@@ -4,28 +4,37 @@ Outputs results to a JSON file per company in the ./output/ directory.
 """
 
 import json
-import os
-import sys
-import time
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 import requests
 import yaml
 
+try:
+    from airflow.decorators import task
+except ImportError:
+    def task(func):
+        func.function = func
+        return func
+
 COMPANIES_FILE = "companies.yaml"
-OUTPUT_DIR = "output"
 
 
-def load_companies(path: str) -> list[dict]:
-    """Load and return enabled companies from the YAML config."""
+
+@task
+def load_companies(path: str, scraper_type: str = None) -> list[dict]:
+    """Load and return enabled companies from the YAML config, optionally filtered by scraper_type."""
     with open(path, "r") as f:
         data = yaml.safe_load(f)
 
     companies = data.get("companies", [])
 
     enabled = [c for c in companies if c.get("enabled", False)]
+
+    if scraper_type:
+        enabled = [c for c in enabled if c.get("scraper_type") == scraper_type]
 
     if not enabled:
         print("No enabled companies found in config.")
@@ -41,7 +50,8 @@ def extract_board_token(url: str) -> str:
     return path.split("/")[-1]
 
 
-def scrape_greenhouse(company: dict) -> list[dict]:
+@task
+def scrape_greenhouse(company: dict) -> dict:
     """Scrape all jobs from a Greenhouse job board using their public JSON API."""
     board_token = extract_board_token(company["url"])
     api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
@@ -75,20 +85,20 @@ def scrape_greenhouse(company: dict) -> list[dict]:
             }
         )
 
-    return jobs
+    return {"company_name": company["name"], "jobs": jobs}
 
 
-# Map scraper_type values to their handler functions
-SCRAPERS = {
-    "greenhouse": scrape_greenhouse,
-}
-
-
-def save_results(company_name: str, jobs: list[dict]) -> str:
+@task
+def save_results(result: dict) -> str:
     """Write scraped jobs to a JSON file and return the file path."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    company_name = result["company_name"]
+    jobs = result["jobs"]
+
+    output_dir = Path("/opt/airflow/output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(OUTPUT_DIR, f"{company_name}_{timestamp}.json")
+    file_path = output_dir / f"{company_name}_{timestamp}.json"
 
     output = {
         "company": company_name,
@@ -97,37 +107,25 @@ def save_results(company_name: str, jobs: list[dict]) -> str:
         "jobs": jobs,
     }
 
-    with open(filepath, "w") as f:
-        json.dump(output, f, indent=2)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
 
-    return filepath
+    print(f"  Saved {len(jobs)} jobs -> {file_path}")
+    return str(file_path)
 
 
 if __name__ == "__main__":
-    print(f"Loading companies from {COMPANIES_FILE} ...")
-    companies = load_companies(COMPANIES_FILE)
+    import time
+
+    companies = load_companies.function(COMPANIES_FILE)
 
     if not companies:
-        sys.exit(1)
+        print("No enabled companies found.")
+    else:
+        for company in companies:
+            print(f"\n[{company['name']}]")
+            result = scrape_greenhouse.function(company)
+            save_results.function(result)
+            time.sleep(1)
 
-    for company in companies:
-        name = company["name"]
-        scraper_type = company.get("scraper_type")
-
-        print(f"\n[{name}] scraper_type={scraper_type}")
-
-        scraper_fn = SCRAPERS.get(scraper_type)
-        if scraper_fn is None:
-            print(f"  WARNING: Unknown scraper_type '{scraper_type}' — skipping.")
-            continue
-
-        try:
-            jobs = scraper_fn(company)
-            filepath = save_results(name, jobs)
-            print(f"  Saved {len(jobs)} jobs -> {filepath}")
-        except requests.RequestException as e:
-            print(f"  ERROR scraping {name}: {e}")
-
-        time.sleep(1)
-
-    print("\nDone.")
+        print("\nDone.")

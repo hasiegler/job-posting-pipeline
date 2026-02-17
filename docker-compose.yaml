@@ -5,6 +5,8 @@ x-airflow-common: &airflow-common
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./output:/opt/airflow/output
+    - ./include:/opt/airflow/include
+    - ./tests:/opt/airflow/tests
     - ./companies.yaml:/opt/airflow/companies.yaml
     - ./scrape_jobs.py:/opt/airflow/scrape_jobs.py
   depends_on:
