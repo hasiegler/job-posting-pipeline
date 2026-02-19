@@ -33,6 +33,29 @@ def create_companies_table():
     close_conn_cursor(conn, cur)
 
 
+def create_staging_jobs_table():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS staging_jobs (
+            job_id         SERIAL PRIMARY KEY,
+            company_id     INTEGER NOT NULL REFERENCES companies(company_id),
+            scraper_type   TEXT NOT NULL,
+            source_job_id  TEXT NOT NULL,
+            source_url     TEXT,
+            raw_data       JSONB NOT NULL,
+            scraped_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+            processed      BOOLEAN NOT NULL DEFAULT FALSE,
+            processed_at   TIMESTAMP
+        );
+    """)
+
+    conn.commit()
+    print("staging_jobs table created successfully.")
+    close_conn_cursor(conn, cur)
+
+
 if __name__ == "__main__":
     create_companies_table()
+    create_staging_jobs_table()
     print("\nDone.")
