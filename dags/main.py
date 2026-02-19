@@ -2,6 +2,7 @@ from airflow import DAG
 from datetime import datetime, timedelta, timezone
 
 from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
+from datawarehouse.sync_companies import sync_companies
 COMPANIES_FILE = "companies.yaml"
 
 default_args = {
@@ -24,7 +25,13 @@ with DAG(
     dagrun_timeout=timedelta(hours=1),
 ) as dag:
 
-    #Define tasks
+    # Step 0: Sync companies.yaml to Supabase
+    sync = sync_companies(COMPANIES_FILE)
+
+    # Step 1: Scrape and save
     greenhouse_companies = load_companies(COMPANIES_FILE, "greenhouse")
     company_results = scrape_greenhouse.expand(company=greenhouse_companies)
     save_results_task = save_results.expand(result=company_results)
+
+    # Ensure sync completes before scraping
+    sync >> greenhouse_companies >> company_results >> save_results_task

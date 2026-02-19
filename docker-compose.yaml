@@ -1,6 +1,9 @@
 x-airflow-common: &airflow-common
   build: .
   env_file: .env
+  environment:
+    &airflow-common-env
+    AIRFLOW_CONN_SUPABASE_DB: 'postgresql://${SUPABASE_USER}:${SUPABASE_PASSWORD}@${SUPABASE_HOST}:${SUPABASE_PORT}/${SUPABASE_DB}?sslmode=require'
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -8,7 +11,6 @@ x-airflow-common: &airflow-common
     - ./include:/opt/airflow/include
     - ./tests:/opt/airflow/tests
     - ./companies.yaml:/opt/airflow/companies.yaml
-    - ./scrape_jobs.py:/opt/airflow/scrape_jobs.py
   depends_on:
     postgres:
       condition: service_healthy
