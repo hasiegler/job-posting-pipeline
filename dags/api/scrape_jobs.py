@@ -4,8 +4,8 @@ Outputs results to a JSON file per company in the ./output/ directory.
 """
 
 import json
+import os
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -90,28 +90,38 @@ def scrape_greenhouse(company: dict) -> dict:
 
 @task
 def save_results(result: dict) -> str:
-    """Write scraped jobs to a JSON file and return the file path."""
+    """Write scraped jobs to S3 as JSON. Path: company/year/month/day/filename.json"""
+    import boto3
+
     company_name = result["company_name"]
     jobs = result["jobs"]
 
-    output_dir = Path("/opt/airflow/output")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    file_path = output_dir / f"{company_name}_{timestamp}.json"
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    filename = f"{company_name}_{timestamp}.json"
+    s3_key = f"{company_name}/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
 
     output = {
         "company": company_name,
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "scraped_at": now.isoformat(),
         "total_jobs": len(jobs),
         "jobs": jobs,
     }
 
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
+    json_data = json.dumps(output, indent=2, ensure_ascii=False)
 
-    print(f"  Saved {len(jobs)} jobs -> {file_path}")
-    return str(file_path)
+    bucket = os.environ["S3_BUCKET_NAME"]
+    s3_client = boto3.client("s3")
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=s3_key,
+        Body=json_data.encode("utf-8"),
+        ContentType="application/json",
+    )
+
+    s3_path = f"s3://{bucket}/{s3_key}"
+    print(f"  Saved {len(jobs)} jobs -> {s3_path}")
+    return s3_path
 
 
 if __name__ == "__main__":

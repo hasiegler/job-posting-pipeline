@@ -22,4 +22,4 @@ companies:
   - name: gitlab_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/gitlab
-    enabled: true
+    enabled: false
