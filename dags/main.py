@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
 from datawarehouse.sync_companies import sync_companies
+from datawarehouse.dwh import update_staging_jobs
 COMPANIES_FILE = "companies.yaml"
 
 default_args = {
@@ -28,10 +29,13 @@ with DAG(
     # Step 0: Sync companies.yaml to Supabase
     sync = sync_companies(COMPANIES_FILE)
 
-    # Step 1: Scrape and save
+    # Step 1: Scrape and save to S3
     greenhouse_companies = load_companies(COMPANIES_FILE, "greenhouse")
     company_results = scrape_greenhouse.expand(company=greenhouse_companies)
-    save_results_task = save_results.expand(result=company_results)
+    s3_paths = save_results.expand(result=company_results)
+
+    # Step 2: Load from S3 into staging_jobs
+    staging = update_staging_jobs.expand(s3_path=s3_paths)
 
     # Ensure sync completes before scraping
-    sync >> greenhouse_companies >> company_results >> save_results_task
+    sync >> greenhouse_companies

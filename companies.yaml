@@ -12,12 +12,12 @@ companies:
   - name: coinbase_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/coinbase
-    enabled: true
+    enabled: false
 
   - name: doordash_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/doordashusa
-    enabled: true
+    enabled: false
 
   - name: gitlab_greenhouse
     scraper_type: greenhouse
