@@ -23,8 +23,8 @@ def create_companies_table():
             base_url      TEXT NOT NULL,
             enabled       BOOLEAN NOT NULL DEFAULT TRUE,
             canonical_name TEXT,
-            created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-            updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     """)
 
@@ -44,9 +44,9 @@ def create_staging_jobs_table():
             source_job_id  TEXT NOT NULL,
             source_url     TEXT,
             raw_data       JSONB NOT NULL,
-            scraped_at     TIMESTAMP NOT NULL DEFAULT NOW(),
+            scraped_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             processed      BOOLEAN NOT NULL DEFAULT FALSE,
-            processed_at   TIMESTAMP
+            processed_at   TIMESTAMPTZ
         );
     """)
 
@@ -80,13 +80,13 @@ def create_jobs_table():
             experience_level    TEXT,
             education_required  TEXT,
             benefits            TEXT[],
-            extracted_at        TIMESTAMP,
+            extracted_at        TIMESTAMPTZ,
             extraction_version  TEXT,
-            first_published_at  TIMESTAMP,
-            first_seen          TIMESTAMP NOT NULL DEFAULT NOW(),
-            last_seen           TIMESTAMP NOT NULL DEFAULT NOW(),
+            first_published_at  TIMESTAMPTZ,
+            first_seen          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             is_active           BOOLEAN NOT NULL DEFAULT TRUE,
-            date_closed         TIMESTAMP,
+            date_closed         TIMESTAMPTZ,
             UNIQUE(company_id, source_job_id)
         );
     """)
