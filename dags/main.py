@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
 from datawarehouse.sync_companies import sync_companies
-from datawarehouse.dwh import update_staging_jobs
+from datawarehouse.dwh import update_staging_jobs, update_jobs_table
 COMPANIES_FILE = "companies.yaml"
 
 default_args = {
@@ -37,5 +37,9 @@ with DAG(
     # Step 2: Load from S3 into staging_jobs
     staging = update_staging_jobs.expand(s3_path=s3_paths)
 
-    # Ensure sync completes before scraping
+    # Step 3: Process staging into jobs table, mark closed jobs
+    jobs = update_jobs_table()
+
+    # Dependencies
     sync >> greenhouse_companies
+    staging >> jobs

@@ -11,7 +11,7 @@ except ImportError:
 
 from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
 from datawarehouse.data_loading import load_s3_json
-from datawarehouse.data_modification import insert_staging_jobs
+from datawarehouse.data_modification import insert_staging_jobs, process_staging_to_jobs
 
 
 @task
@@ -26,3 +26,14 @@ def update_staging_jobs(s3_path: str) -> dict:
     company = data["company"]
     print(f"  Loaded {inserted} jobs into staging_jobs for {company}")
     return {"company": company, "inserted": inserted}
+
+
+@task
+def update_jobs_table() -> dict:
+    """Process all unprocessed staging_jobs rows into the jobs table."""
+    conn, cur = get_conn_cursor()
+    summary = process_staging_to_jobs(conn, cur)
+    close_conn_cursor(conn, cur)
+
+    print(f"  Jobs table updated: {summary}")
+    return summary

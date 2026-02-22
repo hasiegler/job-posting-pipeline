@@ -55,7 +55,49 @@ def create_staging_jobs_table():
     close_conn_cursor(conn, cur)
 
 
+def create_jobs_table():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            job_id              SERIAL PRIMARY KEY,
+            company_id          INTEGER NOT NULL REFERENCES companies(company_id),
+            scraper_type        TEXT NOT NULL,
+            source_job_id       TEXT,
+            source_url          TEXT,
+            title               TEXT NOT NULL,
+            location            TEXT,
+            departments         TEXT[],
+            offices             TEXT[],
+            language            TEXT,
+            description_text    TEXT,
+            description_html    TEXT,
+            skills              TEXT[],
+            salary_min          NUMERIC,
+            salary_max          NUMERIC,
+            salary_currency     TEXT,
+            remote_policy       TEXT,
+            experience_level    TEXT,
+            education_required  TEXT,
+            benefits            TEXT[],
+            extracted_at        TIMESTAMP,
+            extraction_version  TEXT,
+            first_published_at  TIMESTAMP,
+            first_seen          TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_seen           TIMESTAMP NOT NULL DEFAULT NOW(),
+            is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+            date_closed         TIMESTAMP,
+            UNIQUE(company_id, source_job_id)
+        );
+    """)
+
+    conn.commit()
+    print("jobs table created successfully.")
+    close_conn_cursor(conn, cur)
+
+
 if __name__ == "__main__":
     create_companies_table()
     create_staging_jobs_table()
+    create_jobs_table()
     print("\nDone.")
