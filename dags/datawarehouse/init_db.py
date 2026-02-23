@@ -76,6 +76,7 @@ def create_jobs_table():
             salary_min          NUMERIC,
             salary_max          NUMERIC,
             salary_currency     TEXT,
+            salary_period       TEXT,
             remote_policy       TEXT,
             experience_level    TEXT,
             education_required  TEXT,
@@ -87,6 +88,7 @@ def create_jobs_table():
             last_seen           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             is_active           BOOLEAN NOT NULL DEFAULT TRUE,
             date_closed         TIMESTAMPTZ,
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(company_id, source_job_id)
         );
     """)

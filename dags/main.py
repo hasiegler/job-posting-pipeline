@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
 from datawarehouse.sync_companies import sync_companies
-from datawarehouse.dwh import update_staging_jobs, update_jobs_table
+from datawarehouse.dwh import update_staging_jobs, update_jobs_table, extract_fields, clean_staging
 COMPANIES_FILE = "companies.yaml"
 
 default_args = {
@@ -40,6 +40,12 @@ with DAG(
     # Step 3: Process staging into jobs table, mark closed jobs
     jobs = update_jobs_table()
 
+    # Step 4: Extract structured fields from descriptions
+    extraction = extract_fields()
+
+    # Step 5: Purge processed staging rows
+    cleanup = clean_staging()
+
     # Dependencies
     sync >> greenhouse_companies
-    staging >> jobs
+    staging >> jobs >> extraction >> cleanup

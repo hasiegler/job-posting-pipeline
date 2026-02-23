@@ -4,7 +4,11 @@ Helper functions for inserting/modifying data in Supabase tables.
 
 import json
 import logging
+from datetime import datetime
 from urllib.parse import urlparse, urlunparse
+
+from extraction import EXTRACTION_VERSION
+from extraction.salary import extract_salary
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +19,14 @@ def clean_url(url: str) -> str:
         return url
     parsed = urlparse(url)
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+
+def _parse_timestamp(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value)
 
 
 def normalize_greenhouse(raw_data: dict) -> dict:
@@ -29,11 +41,12 @@ def normalize_greenhouse(raw_data: dict) -> dict:
         "language": raw_data.get("language"),
         "description_text": raw_data.get("content_text"),
         "description_html": raw_data.get("content_html"),
-        "first_published_at": raw_data.get("first_published"),
+        "first_published_at": _parse_timestamp(raw_data.get("first_published")),
         "skills": None,
         "salary_min": None,
         "salary_max": None,
         "salary_currency": None,
+        "salary_period": None,
         "remote_policy": None,
         "experience_level": None,
         "education_required": None,
@@ -111,8 +124,11 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 logger.info(f"Reactivated job {normalized['source_job_id']}")
 
             if changes:
+                changes["extracted_at"] = None
+                changes["extraction_version"] = None
                 set_clauses = [f"{f} = %s" for f in changes]
                 set_clauses.append("last_seen = NOW()")
+                set_clauses.append("updated_at = NOW()")
                 values = list(changes.values())
                 values.append(existing["job_id"])
                 cur.execute(
@@ -155,7 +171,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
     for company_id, scraper_type in companies_seen:
         cur.execute("""
             UPDATE jobs
-            SET is_active = FALSE, date_closed = NOW()
+            SET is_active = FALSE, date_closed = NOW(), updated_at = NOW()
             WHERE company_id = %s
               AND scraper_type = %s
               AND is_active = TRUE
@@ -169,6 +185,66 @@ def process_staging_to_jobs(conn, cur) -> dict:
     summary = {"inserted": inserted, "updated": updated, "unchanged": unchanged, "closed": closed}
     logger.info(f"Staging processed: {summary}")
     return summary
+
+
+def extract_fields_from_jobs(conn, cur) -> dict:
+    """Run field extraction on all jobs that haven't been extracted yet."""
+    cur.execute("""
+        SELECT job_id, description_text
+        FROM jobs
+        WHERE extracted_at IS NULL
+        ORDER BY job_id
+    """)
+    rows = cur.fetchall()
+
+    if not rows:
+        logger.info("No unextracted jobs found.")
+        return {"processed": 0, "salary_found": 0}
+
+    processed = 0
+    salary_found = 0
+
+    for row in rows:
+        job_id = row["job_id"]
+        salary = extract_salary(row["description_text"])
+
+        if salary:
+            cur.execute("""
+                UPDATE jobs
+                SET salary_min = %s, salary_max = %s, salary_currency = %s,
+                    salary_period = %s, extracted_at = NOW(),
+                    extraction_version = %s, updated_at = NOW()
+                WHERE job_id = %s
+            """, (
+                salary.salary_min, salary.salary_max,
+                salary.salary_currency, salary.salary_period,
+                EXTRACTION_VERSION, job_id,
+            ))
+            salary_found += 1
+        else:
+            cur.execute("""
+                UPDATE jobs
+                SET extracted_at = NOW(), extraction_version = %s,
+                    updated_at = NOW()
+                WHERE job_id = %s
+            """, (EXTRACTION_VERSION, job_id))
+
+        processed += 1
+
+    conn.commit()
+
+    summary = {"processed": processed, "salary_found": salary_found}
+    logger.info(f"Field extraction complete: {summary}")
+    return summary
+
+
+def purge_processed_staging(conn, cur) -> int:
+    """Delete all processed rows from staging_jobs."""
+    cur.execute("DELETE FROM staging_jobs WHERE processed = TRUE")
+    deleted = cur.rowcount
+    conn.commit()
+    logger.info(f"Purged {deleted} processed rows from staging_jobs.")
+    return deleted
 
 
 def insert_staging_jobs(conn, cur, data: dict) -> int:

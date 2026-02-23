@@ -11,7 +11,12 @@ except ImportError:
 
 from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
 from datawarehouse.data_loading import load_s3_json
-from datawarehouse.data_modification import insert_staging_jobs, process_staging_to_jobs
+from datawarehouse.data_modification import (
+    insert_staging_jobs,
+    process_staging_to_jobs,
+    extract_fields_from_jobs,
+    purge_processed_staging,
+)
 
 
 @task
@@ -37,3 +42,25 @@ def update_jobs_table() -> dict:
 
     print(f"  Jobs table updated: {summary}")
     return summary
+
+
+@task
+def extract_fields() -> dict:
+    """Extract structured fields (salary, etc.) from unprocessed job descriptions."""
+    conn, cur = get_conn_cursor()
+    summary = extract_fields_from_jobs(conn, cur)
+    close_conn_cursor(conn, cur)
+
+    print(f"  Fields extracted: {summary}")
+    return summary
+
+
+@task
+def clean_staging() -> dict:
+    """Delete processed rows from staging_jobs."""
+    conn, cur = get_conn_cursor()
+    deleted = purge_processed_staging(conn, cur)
+    close_conn_cursor(conn, cur)
+
+    print(f"  Purged {deleted} processed staging rows")
+    return {"deleted": deleted}
