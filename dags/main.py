@@ -24,6 +24,7 @@ with DAG(
     catchup=False,
     max_active_runs=1,
     dagrun_timeout=timedelta(hours=1),
+    is_paused_upon_creation=True,
 ) as dag:
 
     # Step 0: Sync companies.yaml to Supabase

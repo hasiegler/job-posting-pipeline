@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 
 from extraction import EXTRACTION_VERSION
 from extraction.salary import extract_salary
+from extraction.remote_policy import extract_remote_policy
 
 logger = logging.getLogger(__name__)
 
@@ -190,50 +191,66 @@ def process_staging_to_jobs(conn, cur) -> dict:
 def extract_fields_from_jobs(conn, cur) -> dict:
     """Run field extraction on all jobs that haven't been extracted yet."""
     cur.execute("""
-        SELECT job_id, description_text
+        SELECT job_id, description_text, location
         FROM jobs
         WHERE extracted_at IS NULL
+        AND is_active = TRUE
         ORDER BY job_id
     """)
     rows = cur.fetchall()
 
     if not rows:
         logger.info("No unextracted jobs found.")
-        return {"processed": 0, "salary_found": 0}
+        return {"processed": 0, "salary_found": 0, "remote_policy_found": 0}
 
     processed = 0
     salary_found = 0
+    remote_policy_found = 0
 
     for row in rows:
         job_id = row["job_id"]
-        salary = extract_salary(row["description_text"])
+        desc = row["description_text"]
+        loc = row["location"]
+
+        salary = extract_salary(desc)
+        remote_policy = extract_remote_policy(desc, loc)
+
+        fields = {
+            "extracted_at": "NOW()",
+            "extraction_version": EXTRACTION_VERSION,
+            "updated_at": "NOW()",
+        }
+        params = []
 
         if salary:
-            cur.execute("""
-                UPDATE jobs
-                SET salary_min = %s, salary_max = %s, salary_currency = %s,
-                    salary_period = %s, extracted_at = NOW(),
-                    extraction_version = %s, updated_at = NOW()
-                WHERE job_id = %s
-            """, (
-                salary.salary_min, salary.salary_max,
-                salary.salary_currency, salary.salary_period,
-                EXTRACTION_VERSION, job_id,
-            ))
+            fields["salary_min"] = salary.salary_min
+            fields["salary_max"] = salary.salary_max
+            fields["salary_currency"] = salary.salary_currency
+            fields["salary_period"] = salary.salary_period
             salary_found += 1
-        else:
-            cur.execute("""
-                UPDATE jobs
-                SET extracted_at = NOW(), extraction_version = %s,
-                    updated_at = NOW()
-                WHERE job_id = %s
-            """, (EXTRACTION_VERSION, job_id))
 
+        if remote_policy:
+            fields["remote_policy"] = remote_policy
+            remote_policy_found += 1
+
+        set_clauses = []
+        for col, val in fields.items():
+            if val == "NOW()":
+                set_clauses.append(f"{col} = NOW()")
+            else:
+                set_clauses.append(f"{col} = %s")
+                params.append(val)
+
+        params.append(job_id)
+        cur.execute(
+            f"UPDATE jobs SET {', '.join(set_clauses)} WHERE job_id = %s",
+            params,
+        )
         processed += 1
 
     conn.commit()
 
-    summary = {"processed": processed, "salary_found": salary_found}
+    summary = {"processed": processed, "salary_found": salary_found, "remote_policy_found": remote_policy_found}
     logger.info(f"Field extraction complete: {summary}")
     return summary
 

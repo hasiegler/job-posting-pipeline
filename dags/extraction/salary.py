@@ -1,10 +1,11 @@
 """Extract salary information from job description text."""
 
-import html
 import re
 import logging
 from dataclasses import dataclass, asdict
 from typing import Optional
+
+from extraction import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,6 @@ _YEARLY_RE = re.compile(
 )
 
 
-def _strip_html(text: str) -> str:
-    """Decode HTML entities and strip tags, collapsing whitespace."""
-    text = html.unescape(text)
-    text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text)
-
-
 def _parse_amount(raw: str, has_k: bool) -> float:
     """Parse a salary amount, handling both US (1,000) and EU (1.000) formats."""
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
@@ -108,7 +102,7 @@ def extract_salary(description: str) -> Optional[SalaryResult]:
     if not description:
         return None
 
-    cleaned = _strip_html(description)
+    cleaned = strip_html(description)
     m = _RANGE_RE.search(cleaned)
     if not m:
         return None
