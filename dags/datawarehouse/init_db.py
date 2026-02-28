@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
 
-
 def create_companies_table():
     conn, cur = get_conn_cursor()
 
@@ -98,8 +97,31 @@ def create_jobs_table():
     close_conn_cursor(conn, cur)
 
 
+def create_skills_table():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS skills (
+            skill_id      SERIAL PRIMARY KEY,
+            skill_name    TEXT NOT NULL,
+            category      TEXT NOT NULL,
+            aliases       TEXT[] NOT NULL,
+            is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(skill_name, category),
+            CHECK (COALESCE(array_length(aliases, 1), 0) >= 2)
+        );
+    """)
+
+    conn.commit()
+    print("skills table created successfully.")
+    close_conn_cursor(conn, cur)
+
+
 if __name__ == "__main__":
     create_companies_table()
     create_staging_jobs_table()
     create_jobs_table()
+    create_skills_table()
     print("\nDone.")
