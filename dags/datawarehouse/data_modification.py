@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urlunparse
 from extraction import EXTRACTION_VERSION
 from extraction.salary import extract_salary
 from extraction.remote_policy import extract_remote_policy
+from extraction.skills import build_skill_matchers, extract_skills
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +191,10 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
 def extract_fields_from_jobs(conn, cur) -> dict:
     """Run field extraction on all jobs that haven't been extracted yet."""
+    skill_matchers = build_skill_matchers(cur)
+
     cur.execute("""
-        SELECT job_id, description_text, location
+        SELECT job_id, title, description_text, location
         FROM jobs
         WHERE extracted_at IS NULL
         AND is_active = TRUE
@@ -201,19 +204,22 @@ def extract_fields_from_jobs(conn, cur) -> dict:
 
     if not rows:
         logger.info("No unextracted jobs found.")
-        return {"processed": 0, "salary_found": 0, "remote_policy_found": 0}
+        return {"processed": 0, "salary_found": 0, "remote_policy_found": 0, "skills_found": 0}
 
     processed = 0
     salary_found = 0
     remote_policy_found = 0
+    skills_found = 0
 
     for row in rows:
         job_id = row["job_id"]
+        title = row["title"]
         desc = row["description_text"]
         loc = row["location"]
 
         salary = extract_salary(desc)
         remote_policy = extract_remote_policy(desc, loc)
+        skills = extract_skills(" ".join(part for part in [title, desc] if part), skill_matchers)
 
         fields = {
             "extracted_at": "NOW()",
@@ -233,6 +239,10 @@ def extract_fields_from_jobs(conn, cur) -> dict:
             fields["remote_policy"] = remote_policy
             remote_policy_found += 1
 
+        fields["skills"] = skills
+        if skills:
+            skills_found += 1
+
         set_clauses = []
         for col, val in fields.items():
             if val == "NOW()":
@@ -250,7 +260,12 @@ def extract_fields_from_jobs(conn, cur) -> dict:
 
     conn.commit()
 
-    summary = {"processed": processed, "salary_found": salary_found, "remote_policy_found": remote_policy_found}
+    summary = {
+        "processed": processed,
+        "salary_found": salary_found,
+        "remote_policy_found": remote_policy_found,
+        "skills_found": skills_found,
+    }
     logger.info(f"Field extraction complete: {summary}")
     return summary
 
