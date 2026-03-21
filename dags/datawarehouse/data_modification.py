@@ -15,6 +15,184 @@ from extraction.skills import build_skill_matchers, extract_skills
 logger = logging.getLogger(__name__)
 
 
+def _empty_company_metrics() -> dict:
+    return {
+        "inserted": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "closed": 0,
+        "extraction_attempted": 0,
+        "salary_found": 0,
+        "remote_policy_found": 0,
+        "skills_found": 0,
+    }
+
+
+def ensure_monitoring_tables(conn, cur) -> None:
+    """Create telemetry tables used for run monitoring if missing."""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            dag_id               TEXT NOT NULL,
+            run_id               TEXT NOT NULL,
+            run_started_at       TIMESTAMPTZ NOT NULL,
+            run_finished_at      TIMESTAMPTZ NOT NULL,
+            status               TEXT NOT NULL,
+            total_companies      INTEGER NOT NULL DEFAULT 0,
+            total_scraped        INTEGER NOT NULL DEFAULT 0,
+            total_staged         INTEGER NOT NULL DEFAULT 0,
+            total_new            INTEGER NOT NULL DEFAULT 0,
+            total_updated        INTEGER NOT NULL DEFAULT 0,
+            total_unchanged      INTEGER NOT NULL DEFAULT 0,
+            total_closed         INTEGER NOT NULL DEFAULT 0,
+            total_extracted      INTEGER NOT NULL DEFAULT 0,
+            salary_found         INTEGER NOT NULL DEFAULT 0,
+            remote_policy_found  INTEGER NOT NULL DEFAULT 0,
+            skills_found         INTEGER NOT NULL DEFAULT 0,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (dag_id, run_id)
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started
+        ON pipeline_runs (run_started_at DESC);
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS company_run_metrics (
+            dag_id               TEXT NOT NULL,
+            run_id               TEXT NOT NULL,
+            run_started_at       TIMESTAMPTZ NOT NULL,
+            company_id           INTEGER NOT NULL REFERENCES companies(company_id),
+            company_name         TEXT NOT NULL,
+            scraped_jobs         INTEGER NOT NULL DEFAULT 0,
+            staged_jobs          INTEGER NOT NULL DEFAULT 0,
+            new_jobs             INTEGER NOT NULL DEFAULT 0,
+            updated_jobs         INTEGER NOT NULL DEFAULT 0,
+            unchanged_jobs       INTEGER NOT NULL DEFAULT 0,
+            closed_jobs          INTEGER NOT NULL DEFAULT 0,
+            extraction_attempted INTEGER NOT NULL DEFAULT 0,
+            salary_found         INTEGER NOT NULL DEFAULT 0,
+            remote_policy_found  INTEGER NOT NULL DEFAULT 0,
+            skills_found         INTEGER NOT NULL DEFAULT 0,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (dag_id, run_id, company_id)
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_company_run_metrics_company_started
+        ON company_run_metrics (company_id, run_started_at DESC);
+        """
+    )
+    conn.commit()
+
+
+def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[dict]) -> None:
+    """Upsert one run summary row and all company rows for that run."""
+    ensure_monitoring_tables(conn, cur)
+
+    cur.execute(
+        """
+        INSERT INTO pipeline_runs (
+            dag_id, run_id, run_started_at, run_finished_at, status,
+            total_companies, total_scraped, total_staged, total_new, total_updated,
+            total_unchanged, total_closed, total_extracted, salary_found,
+            remote_policy_found, skills_found, updated_at
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+        )
+        ON CONFLICT (dag_id, run_id) DO UPDATE SET
+            run_started_at = EXCLUDED.run_started_at,
+            run_finished_at = EXCLUDED.run_finished_at,
+            status = EXCLUDED.status,
+            total_companies = EXCLUDED.total_companies,
+            total_scraped = EXCLUDED.total_scraped,
+            total_staged = EXCLUDED.total_staged,
+            total_new = EXCLUDED.total_new,
+            total_updated = EXCLUDED.total_updated,
+            total_unchanged = EXCLUDED.total_unchanged,
+            total_closed = EXCLUDED.total_closed,
+            total_extracted = EXCLUDED.total_extracted,
+            salary_found = EXCLUDED.salary_found,
+            remote_policy_found = EXCLUDED.remote_policy_found,
+            skills_found = EXCLUDED.skills_found,
+            updated_at = NOW();
+        """,
+        (
+            run_metrics["dag_id"],
+            run_metrics["run_id"],
+            run_metrics["run_started_at"],
+            run_metrics["run_finished_at"],
+            run_metrics["status"],
+            run_metrics["total_companies"],
+            run_metrics["total_scraped"],
+            run_metrics["total_staged"],
+            run_metrics["total_new"],
+            run_metrics["total_updated"],
+            run_metrics["total_unchanged"],
+            run_metrics["total_closed"],
+            run_metrics["total_extracted"],
+            run_metrics["salary_found"],
+            run_metrics["remote_policy_found"],
+            run_metrics["skills_found"],
+        ),
+    )
+
+    for row in company_metrics:
+        cur.execute(
+            """
+            INSERT INTO company_run_metrics (
+                dag_id, run_id, run_started_at, company_id, company_name,
+                scraped_jobs, staged_jobs, new_jobs, updated_jobs, unchanged_jobs,
+                closed_jobs, extraction_attempted, salary_found, remote_policy_found,
+                skills_found, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+            )
+            ON CONFLICT (dag_id, run_id, company_id) DO UPDATE SET
+                run_started_at = EXCLUDED.run_started_at,
+                company_name = EXCLUDED.company_name,
+                scraped_jobs = EXCLUDED.scraped_jobs,
+                staged_jobs = EXCLUDED.staged_jobs,
+                new_jobs = EXCLUDED.new_jobs,
+                updated_jobs = EXCLUDED.updated_jobs,
+                unchanged_jobs = EXCLUDED.unchanged_jobs,
+                closed_jobs = EXCLUDED.closed_jobs,
+                extraction_attempted = EXCLUDED.extraction_attempted,
+                salary_found = EXCLUDED.salary_found,
+                remote_policy_found = EXCLUDED.remote_policy_found,
+                skills_found = EXCLUDED.skills_found,
+                updated_at = NOW();
+            """,
+            (
+                row["dag_id"],
+                row["run_id"],
+                row["run_started_at"],
+                row["company_id"],
+                row["company_name"],
+                row["scraped_jobs"],
+                row["staged_jobs"],
+                row["new_jobs"],
+                row["updated_jobs"],
+                row["unchanged_jobs"],
+                row["closed_jobs"],
+                row["extraction_attempted"],
+                row["salary_found"],
+                row["remote_policy_found"],
+                row["skills_found"],
+            ),
+        )
+
+    conn.commit()
+
+
 def clean_url(url: str) -> str:
     """Strip query parameters and fragments from a URL."""
     if not url:
@@ -75,12 +253,13 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
     if not staging_rows:
         logger.info("No unprocessed staging rows found.")
-        return {"inserted": 0, "updated": 0, "unchanged": 0, "closed": 0}
+        return {"inserted": 0, "updated": 0, "unchanged": 0, "closed": 0, "company_metrics": []}
 
     inserted = 0
     updated = 0
     unchanged = 0
     companies_seen = set()
+    company_metrics = {}
 
     for row in staging_rows:
         staging_id = row["job_id"]
@@ -91,6 +270,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
             raw_data = json.loads(raw_data)
 
         companies_seen.add((company_id, scraper_type))
+        company_metrics.setdefault(company_id, _empty_company_metrics())
 
         normalizer = NORMALIZERS.get(scraper_type)
         if not normalizer:
@@ -138,6 +318,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
                     values,
                 )
                 updated += 1
+                company_metrics[company_id]["updated"] += 1
                 logger.info(f"Updated job {normalized['source_job_id']}: {list(changes.keys())}")
             else:
                 cur.execute(
@@ -145,6 +326,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
                     (existing["job_id"],)
                 )
                 unchanged += 1
+                company_metrics[company_id]["unchanged"] += 1
         else:
             cur.execute("""
                 INSERT INTO jobs (
@@ -162,6 +344,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 normalized["description_html"], normalized["first_published_at"],
             ))
             inserted += 1
+            company_metrics[company_id]["inserted"] += 1
 
         cur.execute("""
             UPDATE staging_jobs SET processed = TRUE, processed_at = NOW()
@@ -181,10 +364,27 @@ def process_staging_to_jobs(conn, cur) -> dict:
             RETURNING job_id
         """, (company_id, scraper_type))
         closed += cur.rowcount
+        company_metrics.setdefault(company_id, _empty_company_metrics())
+        company_metrics[company_id]["closed"] += cur.rowcount
 
     conn.commit()
 
-    summary = {"inserted": inserted, "updated": updated, "unchanged": unchanged, "closed": closed}
+    summary = {
+        "inserted": inserted,
+        "updated": updated,
+        "unchanged": unchanged,
+        "closed": closed,
+        "company_metrics": [
+            {
+                "company_id": company_id,
+                "inserted": metrics["inserted"],
+                "updated": metrics["updated"],
+                "unchanged": metrics["unchanged"],
+                "closed": metrics["closed"],
+            }
+            for company_id, metrics in company_metrics.items()
+        ],
+    }
     logger.info(f"Staging processed: {summary}")
     return summary
 
@@ -194,7 +394,7 @@ def extract_fields_from_jobs(conn, cur) -> dict:
     skill_matchers = build_skill_matchers(cur)
 
     cur.execute("""
-        SELECT job_id, title, description_text, location
+        SELECT job_id, company_id, title, description_text, location
         FROM jobs
         WHERE extracted_at IS NULL
         AND is_active = TRUE
@@ -204,18 +404,28 @@ def extract_fields_from_jobs(conn, cur) -> dict:
 
     if not rows:
         logger.info("No unextracted jobs found.")
-        return {"processed": 0, "salary_found": 0, "remote_policy_found": 0, "skills_found": 0}
+        return {
+            "processed": 0,
+            "salary_found": 0,
+            "remote_policy_found": 0,
+            "skills_found": 0,
+            "company_metrics": [],
+        }
 
     processed = 0
     salary_found = 0
     remote_policy_found = 0
     skills_found = 0
+    company_metrics = {}
 
     for row in rows:
         job_id = row["job_id"]
+        company_id = row["company_id"]
         title = row["title"]
         desc = row["description_text"]
         loc = row["location"]
+        company_metrics.setdefault(company_id, _empty_company_metrics())
+        company_metrics[company_id]["extraction_attempted"] += 1
 
         salary = extract_salary(desc)
         remote_policy = extract_remote_policy(desc, loc)
@@ -234,14 +444,17 @@ def extract_fields_from_jobs(conn, cur) -> dict:
             fields["salary_currency"] = salary.salary_currency
             fields["salary_period"] = salary.salary_period
             salary_found += 1
+            company_metrics[company_id]["salary_found"] += 1
 
         if remote_policy:
             fields["remote_policy"] = remote_policy
             remote_policy_found += 1
+            company_metrics[company_id]["remote_policy_found"] += 1
 
         fields["skills"] = skills
         if skills:
             skills_found += 1
+            company_metrics[company_id]["skills_found"] += 1
 
         set_clauses = []
         for col, val in fields.items():
@@ -265,6 +478,16 @@ def extract_fields_from_jobs(conn, cur) -> dict:
         "salary_found": salary_found,
         "remote_policy_found": remote_policy_found,
         "skills_found": skills_found,
+        "company_metrics": [
+            {
+                "company_id": company_id,
+                "extraction_attempted": metrics["extraction_attempted"],
+                "salary_found": metrics["salary_found"],
+                "remote_policy_found": metrics["remote_policy_found"],
+                "skills_found": metrics["skills_found"],
+            }
+            for company_id, metrics in company_metrics.items()
+        ],
     }
     logger.info(f"Field extraction complete: {summary}")
     return summary

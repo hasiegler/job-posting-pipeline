@@ -119,9 +119,75 @@ def create_skills_table():
     close_conn_cursor(conn, cur)
 
 
+def create_monitoring_tables():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            dag_id               TEXT NOT NULL,
+            run_id               TEXT NOT NULL,
+            run_started_at       TIMESTAMPTZ NOT NULL,
+            run_finished_at      TIMESTAMPTZ NOT NULL,
+            status               TEXT NOT NULL,
+            total_companies      INTEGER NOT NULL DEFAULT 0,
+            total_scraped        INTEGER NOT NULL DEFAULT 0,
+            total_staged         INTEGER NOT NULL DEFAULT 0,
+            total_new            INTEGER NOT NULL DEFAULT 0,
+            total_updated        INTEGER NOT NULL DEFAULT 0,
+            total_unchanged      INTEGER NOT NULL DEFAULT 0,
+            total_closed         INTEGER NOT NULL DEFAULT 0,
+            total_extracted      INTEGER NOT NULL DEFAULT 0,
+            salary_found         INTEGER NOT NULL DEFAULT 0,
+            remote_policy_found  INTEGER NOT NULL DEFAULT 0,
+            skills_found         INTEGER NOT NULL DEFAULT 0,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (dag_id, run_id)
+        );
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started
+        ON pipeline_runs (run_started_at DESC);
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS company_run_metrics (
+            dag_id               TEXT NOT NULL,
+            run_id               TEXT NOT NULL,
+            run_started_at       TIMESTAMPTZ NOT NULL,
+            company_id           INTEGER NOT NULL REFERENCES companies(company_id),
+            company_name         TEXT NOT NULL,
+            scraped_jobs         INTEGER NOT NULL DEFAULT 0,
+            staged_jobs          INTEGER NOT NULL DEFAULT 0,
+            new_jobs             INTEGER NOT NULL DEFAULT 0,
+            updated_jobs         INTEGER NOT NULL DEFAULT 0,
+            unchanged_jobs       INTEGER NOT NULL DEFAULT 0,
+            closed_jobs          INTEGER NOT NULL DEFAULT 0,
+            extraction_attempted INTEGER NOT NULL DEFAULT 0,
+            salary_found         INTEGER NOT NULL DEFAULT 0,
+            remote_policy_found  INTEGER NOT NULL DEFAULT 0,
+            skills_found         INTEGER NOT NULL DEFAULT 0,
+            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (dag_id, run_id, company_id)
+        );
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_company_run_metrics_company_started
+        ON company_run_metrics (company_id, run_started_at DESC);
+    """)
+
+    conn.commit()
+    print("monitoring tables created successfully.")
+    close_conn_cursor(conn, cur)
+
+
 if __name__ == "__main__":
     create_companies_table()
     create_staging_jobs_table()
     create_jobs_table()
     create_skills_table()
+    create_monitoring_tables()
     print("\nDone.")

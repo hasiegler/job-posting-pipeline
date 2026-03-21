@@ -3,7 +3,13 @@ from datetime import datetime, timedelta, timezone
 
 from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
 from datawarehouse.sync_companies import sync_companies
-from datawarehouse.dwh import update_staging_jobs, update_jobs_table, extract_fields, clean_staging
+from datawarehouse.dwh import (
+    update_staging_jobs,
+    update_jobs_table,
+    extract_fields,
+    clean_staging,
+    finalize_run_metrics,
+)
 COMPANIES_FILE = "companies.yaml"
 
 default_args = {
@@ -47,6 +53,15 @@ with DAG(
     # Step 5: Purge processed staging rows
     cleanup = clean_staging()
 
+    # Step 6: Persist per-run monitoring metrics
+    finalize_metrics = finalize_run_metrics(
+        sync_summary=sync,
+        staging_summaries=staging,
+        jobs_summary=jobs,
+        extraction_summary=extraction,
+        cleanup_summary=cleanup,
+    )
+
     # Dependencies
     sync >> greenhouse_companies
-    staging >> jobs >> extraction >> cleanup
+    staging >> jobs >> extraction >> cleanup >> finalize_metrics
