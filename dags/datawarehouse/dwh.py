@@ -22,6 +22,7 @@ from datawarehouse.data_modification import (
     process_staging_to_jobs,
     extract_fields_from_jobs,
     purge_processed_staging,
+    snapshot_changed_jobs,
     upsert_run_monitoring,
 )
 
@@ -49,6 +50,22 @@ def update_jobs_table() -> dict:
     close_conn_cursor(conn, cur)
 
     print(f"  Jobs table updated: {summary}")
+    return summary
+
+
+@task
+def snapshot_job_changes(jobs_summary: dict) -> dict:
+    """Write history snapshots for all jobs that changed in this run."""
+    changed_jobs = (jobs_summary or {}).get("changed_jobs", [])
+    if not changed_jobs:
+        print("  No job changes to snapshot.")
+        return {"snapshots_written": 0}
+
+    conn, cur = get_conn_cursor()
+    summary = snapshot_changed_jobs(conn, cur, changed_jobs)
+    close_conn_cursor(conn, cur)
+
+    print(f"  Job history snapshots: {summary}")
     return summary
 
 

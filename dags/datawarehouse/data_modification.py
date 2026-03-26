@@ -94,6 +94,139 @@ def ensure_monitoring_tables(conn, cur) -> None:
     conn.commit()
 
 
+def ensure_job_history_table(conn, cur) -> None:
+    """Create job_history table and indexes if missing."""
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_history (
+            history_id          BIGSERIAL PRIMARY KEY,
+            job_id              INTEGER NOT NULL REFERENCES jobs(job_id),
+            company_id          INTEGER NOT NULL REFERENCES companies(company_id),
+            source_job_id       TEXT NOT NULL,
+            change_type         TEXT NOT NULL,
+            changed_fields      TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
+            title               TEXT,
+            source_url          TEXT,
+            location            TEXT,
+            departments         TEXT[],
+            offices             TEXT[],
+            language            TEXT,
+            description_text    TEXT,
+            description_html    TEXT,
+            skills              TEXT[],
+            salary_min          NUMERIC,
+            salary_max          NUMERIC,
+            salary_currency     TEXT,
+            salary_period       TEXT,
+            remote_policy       TEXT,
+            experience_level    TEXT,
+            education_required  TEXT,
+            benefits            TEXT[],
+            first_published_at  TIMESTAMPTZ,
+            is_active           BOOLEAN NOT NULL,
+            recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_job_history_job_id
+        ON job_history (job_id, recorded_at DESC);
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_job_history_company
+        ON job_history (company_id, recorded_at DESC);
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_job_history_change_type
+        ON job_history (change_type, recorded_at DESC);
+        """
+    )
+    conn.commit()
+
+
+def snapshot_changed_jobs(conn, cur, changed_jobs: list[dict]) -> dict:
+    """Write a history row for each changed job, capturing its current state."""
+    ensure_job_history_table(conn, cur)
+
+    if not changed_jobs:
+        return {"snapshots_written": 0}
+
+    job_ids = [row["job_id"] for row in changed_jobs]
+    change_map = {
+        row["job_id"]: {
+            "change_type": row["change_type"],
+            "changed_fields": row.get("changed_fields", []),
+        }
+        for row in changed_jobs
+    }
+
+    cur.execute(
+        """
+        SELECT job_id, company_id, source_job_id, title, source_url, location,
+               departments, offices, language, description_text, description_html,
+               skills, salary_min, salary_max, salary_currency, salary_period,
+               remote_policy, experience_level, education_required, benefits,
+               first_published_at, is_active
+        FROM jobs
+        WHERE job_id = ANY(%s)
+        """,
+        (job_ids,),
+    )
+    rows = cur.fetchall()
+
+    for row in rows:
+        change_info = change_map[row["job_id"]]
+        cur.execute(
+            """
+            INSERT INTO job_history (
+                job_id, company_id, source_job_id, change_type, changed_fields,
+                title, source_url, location, departments, offices, language,
+                description_text, description_html, skills,
+                salary_min, salary_max, salary_currency, salary_period,
+                remote_policy, experience_level, education_required, benefits,
+                first_published_at, is_active
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                row["job_id"],
+                row["company_id"],
+                row["source_job_id"],
+                change_info["change_type"],
+                change_info["changed_fields"],
+                row["title"],
+                row["source_url"],
+                row["location"],
+                row["departments"],
+                row["offices"],
+                row["language"],
+                row["description_text"],
+                row["description_html"],
+                row["skills"],
+                row["salary_min"],
+                row["salary_max"],
+                row["salary_currency"],
+                row["salary_period"],
+                row["remote_policy"],
+                row["experience_level"],
+                row["education_required"],
+                row["benefits"],
+                row["first_published_at"],
+                row["is_active"],
+            ),
+        )
+
+    conn.commit()
+    return {"snapshots_written": len(rows)}
+
+
 def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[dict]) -> None:
     """Upsert one run summary row and all company rows for that run."""
     ensure_monitoring_tables(conn, cur)
@@ -253,13 +386,21 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
     if not staging_rows:
         logger.info("No unprocessed staging rows found.")
-        return {"inserted": 0, "updated": 0, "unchanged": 0, "closed": 0, "company_metrics": []}
+        return {
+            "inserted": 0,
+            "updated": 0,
+            "unchanged": 0,
+            "closed": 0,
+            "company_metrics": [],
+            "changed_jobs": [],
+        }
 
     inserted = 0
     updated = 0
     unchanged = 0
     companies_seen = set()
     company_metrics = {}
+    changed_jobs = []
 
     for row in staging_rows:
         staging_id = row["job_id"]
@@ -290,6 +431,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
         if existing:
             changes = {}
+            changed_fields = []
             compare_fields = [
                 "source_url", "title", "location", "departments", "offices",
                 "language", "description_text", "description_html", "first_published_at",
@@ -299,10 +441,13 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 old_val = existing.get(field)
                 if new_val != old_val:
                     changes[field] = new_val
+                    changed_fields.append(field)
 
+            reactivated = False
             if not existing["is_active"]:
                 changes["is_active"] = True
                 changes["date_closed"] = None
+                reactivated = True
                 logger.info(f"Reactivated job {normalized['source_job_id']}")
 
             if changes:
@@ -319,6 +464,14 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 )
                 updated += 1
                 company_metrics[company_id]["updated"] += 1
+                change_type = "reactivated" if reactivated else "updated"
+                changed_jobs.append(
+                    {
+                        "job_id": existing["job_id"],
+                        "change_type": change_type,
+                        "changed_fields": changed_fields,
+                    }
+                )
                 logger.info(f"Updated job {normalized['source_job_id']}: {list(changes.keys())}")
             else:
                 cur.execute(
@@ -335,6 +488,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
                     description_text, description_html, first_published_at,
                     first_seen, last_seen, is_active
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), TRUE)
+                RETURNING job_id
             """, (
                 company_id, scraper_type,
                 normalized["source_job_id"], normalized["source_url"],
@@ -343,8 +497,16 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 normalized["language"], normalized["description_text"],
                 normalized["description_html"], normalized["first_published_at"],
             ))
+            new_job = cur.fetchone()
             inserted += 1
             company_metrics[company_id]["inserted"] += 1
+            changed_jobs.append(
+                {
+                    "job_id": new_job["job_id"],
+                    "change_type": "inserted",
+                    "changed_fields": [],
+                }
+            )
 
         cur.execute("""
             UPDATE staging_jobs SET processed = TRUE, processed_at = NOW()
@@ -363,9 +525,18 @@ def process_staging_to_jobs(conn, cur) -> dict:
               AND last_seen < CURRENT_DATE
             RETURNING job_id
         """, (company_id, scraper_type))
-        closed += cur.rowcount
+        closed_rows = cur.fetchall()
+        closed += len(closed_rows)
         company_metrics.setdefault(company_id, _empty_company_metrics())
-        company_metrics[company_id]["closed"] += cur.rowcount
+        company_metrics[company_id]["closed"] += len(closed_rows)
+        for row in closed_rows:
+            changed_jobs.append(
+                {
+                    "job_id": row["job_id"],
+                    "change_type": "closed",
+                    "changed_fields": [],
+                }
+            )
 
     conn.commit()
 
@@ -384,6 +555,7 @@ def process_staging_to_jobs(conn, cur) -> dict:
             }
             for company_id, metrics in company_metrics.items()
         ],
+        "changed_jobs": changed_jobs,
     }
     logger.info(f"Staging processed: {summary}")
     return summary

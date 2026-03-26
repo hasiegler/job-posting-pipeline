@@ -184,10 +184,94 @@ def create_monitoring_tables():
     close_conn_cursor(conn, cur)
 
 
+def create_job_history_table():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS job_history (
+            history_id          BIGSERIAL PRIMARY KEY,
+            job_id              INTEGER NOT NULL REFERENCES jobs(job_id),
+            company_id          INTEGER NOT NULL REFERENCES companies(company_id),
+            source_job_id       TEXT NOT NULL,
+            change_type         TEXT NOT NULL,
+            changed_fields      TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
+            title               TEXT,
+            source_url          TEXT,
+            location            TEXT,
+            departments         TEXT[],
+            offices             TEXT[],
+            language            TEXT,
+            description_text    TEXT,
+            description_html    TEXT,
+            skills              TEXT[],
+            salary_min          NUMERIC,
+            salary_max          NUMERIC,
+            salary_currency     TEXT,
+            salary_period       TEXT,
+            remote_policy       TEXT,
+            experience_level    TEXT,
+            education_required  TEXT,
+            benefits            TEXT[],
+            first_published_at  TIMESTAMPTZ,
+            is_active           BOOLEAN NOT NULL,
+            recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_history_job_id
+        ON job_history (job_id, recorded_at DESC);
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_history_company
+        ON job_history (company_id, recorded_at DESC);
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_history_change_type
+        ON job_history (change_type, recorded_at DESC);
+    """)
+
+    conn.commit()
+    print("job_history table created successfully.")
+    close_conn_cursor(conn, cur)
+
+
+def seed_job_history():
+    """Manual one-time baseline seed for active jobs."""
+    conn, cur = get_conn_cursor()
+    create_job_history_table()
+
+    cur.execute("""
+        INSERT INTO job_history (
+            job_id, company_id, source_job_id, change_type, changed_fields,
+            title, source_url, location, departments, offices, language,
+            description_text, description_html, skills,
+            salary_min, salary_max, salary_currency, salary_period,
+            remote_policy, experience_level, education_required, benefits,
+            first_published_at, is_active, recorded_at
+        )
+        SELECT
+            job_id, company_id, source_job_id, 'seed', '{}'::TEXT[],
+            title, source_url, location, departments, offices, language,
+            description_text, description_html, skills,
+            salary_min, salary_max, salary_currency, salary_period,
+            remote_policy, experience_level, education_required, benefits,
+            first_published_at, is_active, NOW()
+        FROM jobs
+        WHERE is_active = TRUE;
+    """)
+
+    seeded = cur.rowcount
+    conn.commit()
+    print(f"Seeded {seeded} job_history rows.")
+    close_conn_cursor(conn, cur)
+
+
 if __name__ == "__main__":
     create_companies_table()
     create_staging_jobs_table()
     create_jobs_table()
     create_skills_table()
+    create_job_history_table()
     create_monitoring_tables()
     print("\nDone.")
