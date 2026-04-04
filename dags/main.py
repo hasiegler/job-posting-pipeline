@@ -9,6 +9,7 @@ from datawarehouse.dwh import (
     snapshot_job_changes,
     extract_fields,
     clean_staging,
+    refresh_analytics,
     finalize_run_metrics,
 )
 COMPANIES_FILE = "companies.yaml"
@@ -57,7 +58,10 @@ with DAG(
     # Step 6: Purge processed staging rows
     cleanup = clean_staging()
 
-    # Step 7: Persist per-run monitoring metrics
+    # Step 7: Snapshot precomputed company analytics
+    analytics = refresh_analytics()
+
+    # Step 8: Persist per-run monitoring metrics
     finalize_metrics = finalize_run_metrics(
         sync_summary=sync,
         staging_summaries=staging,
@@ -68,4 +72,7 @@ with DAG(
 
     # Dependencies
     sync >> greenhouse_companies
-    staging >> jobs >> extraction >> history >> cleanup >> finalize_metrics
+    staging >> jobs >> extraction >> history
+    history >> cleanup
+    history >> analytics
+    [cleanup, analytics] >> finalize_metrics

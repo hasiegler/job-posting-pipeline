@@ -24,6 +24,7 @@ from datawarehouse.data_modification import (
     purge_processed_staging,
     snapshot_changed_jobs,
     upsert_run_monitoring,
+    refresh_company_analytics,
 )
 
 
@@ -89,6 +90,17 @@ def clean_staging() -> dict:
 
     print(f"  Purged {deleted} processed staging rows")
     return {"deleted": deleted}
+
+
+@task
+def refresh_analytics() -> dict:
+    """Snapshot precomputed company analytics from the current jobs table."""
+    conn, cur = get_conn_cursor()
+    summary = refresh_company_analytics(conn, cur)
+    close_conn_cursor(conn, cur)
+
+    print(f"  Company analytics refreshed: {summary}")
+    return summary
 
 
 @task

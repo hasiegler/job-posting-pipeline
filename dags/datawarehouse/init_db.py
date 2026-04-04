@@ -119,6 +119,70 @@ def create_skills_table():
     close_conn_cursor(conn, cur)
 
 
+def create_company_analytics_tables():
+    conn, cur = get_conn_cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS company_stats (
+            company_id        INTEGER NOT NULL REFERENCES companies(company_id),
+            snapshot_date     DATE    NOT NULL,
+            active_jobs       INTEGER NOT NULL DEFAULT 0,
+            posted_7d         INTEGER NOT NULL DEFAULT 0,
+            posted_30d        INTEGER NOT NULL DEFAULT 0,
+            closed_7d         INTEGER NOT NULL DEFAULT 0,
+            closed_30d        INTEGER NOT NULL DEFAULT 0,
+            net_change_7d     INTEGER NOT NULL DEFAULT 0,
+            net_change_30d    INTEGER NOT NULL DEFAULT 0,
+            remote_count      INTEGER NOT NULL DEFAULT 0,
+            hybrid_count      INTEGER NOT NULL DEFAULT 0,
+            onsite_count      INTEGER NOT NULL DEFAULT 0,
+            avg_salary_min    NUMERIC,
+            avg_salary_max    NUMERIC,
+            median_salary_min NUMERIC,
+            median_salary_max NUMERIC,
+            PRIMARY KEY (company_id, snapshot_date)
+        );
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_company_stats_date
+        ON company_stats (snapshot_date DESC, company_id);
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS company_skills (
+            company_id    INTEGER NOT NULL REFERENCES companies(company_id),
+            snapshot_date DATE    NOT NULL,
+            skill_name    TEXT    NOT NULL,
+            mention_count INTEGER NOT NULL DEFAULT 0,
+            percentage    NUMERIC NOT NULL DEFAULT 0,
+            PRIMARY KEY (company_id, snapshot_date, skill_name)
+        );
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_company_skills_date
+        ON company_skills (snapshot_date DESC, company_id);
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS company_departments (
+            company_id       INTEGER NOT NULL REFERENCES companies(company_id),
+            snapshot_date    DATE    NOT NULL,
+            department_name  TEXT    NOT NULL,
+            active_job_count INTEGER NOT NULL DEFAULT 0,
+            percentage       NUMERIC NOT NULL DEFAULT 0,
+            PRIMARY KEY (company_id, snapshot_date, department_name)
+        );
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_company_departments_date
+        ON company_departments (snapshot_date DESC, company_id);
+    """)
+
+    conn.commit()
+    print("company analytics tables created successfully.")
+    close_conn_cursor(conn, cur)
+
+
 def create_monitoring_tables():
     conn, cur = get_conn_cursor()
 
@@ -273,5 +337,6 @@ if __name__ == "__main__":
     create_jobs_table()
     create_skills_table()
     create_job_history_table()
+    create_company_analytics_tables()
     create_monitoring_tables()
     print("\nDone.")

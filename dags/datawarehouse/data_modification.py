@@ -326,6 +326,141 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
     conn.commit()
 
 
+def refresh_company_analytics(conn, cur) -> dict:
+    """Snapshot company-level analytics from the current state of the jobs table."""
+    today = datetime.now().date()
+
+    cur.execute(
+        """
+        INSERT INTO company_stats (
+            company_id, snapshot_date, active_jobs,
+            posted_7d, posted_30d, closed_7d, closed_30d,
+            net_change_7d, net_change_30d,
+            remote_count, hybrid_count, onsite_count,
+            avg_salary_min, avg_salary_max,
+            median_salary_min, median_salary_max
+        )
+        SELECT
+            company_id,
+            %s,
+            COUNT(*) FILTER (WHERE is_active),
+            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '7 days'),
+            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '30 days'),
+            COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '7 days'),
+            COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '30 days'),
+            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '7 days')
+                - COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '7 days'),
+            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '30 days')
+                - COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '30 days'),
+            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'Remote'),
+            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'Hybrid'),
+            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'On-Site'),
+            AVG(salary_min)  FILTER (WHERE is_active AND salary_min IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
+            AVG(salary_max)  FILTER (WHERE is_active AND salary_max IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_min)
+                FILTER (WHERE is_active AND salary_min IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_max)
+                FILTER (WHERE is_active AND salary_max IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly')
+        FROM jobs
+        GROUP BY company_id
+        ON CONFLICT (company_id, snapshot_date) DO UPDATE SET
+            active_jobs       = EXCLUDED.active_jobs,
+            posted_7d         = EXCLUDED.posted_7d,
+            posted_30d        = EXCLUDED.posted_30d,
+            closed_7d         = EXCLUDED.closed_7d,
+            closed_30d        = EXCLUDED.closed_30d,
+            net_change_7d     = EXCLUDED.net_change_7d,
+            net_change_30d    = EXCLUDED.net_change_30d,
+            remote_count      = EXCLUDED.remote_count,
+            hybrid_count      = EXCLUDED.hybrid_count,
+            onsite_count      = EXCLUDED.onsite_count,
+            avg_salary_min    = EXCLUDED.avg_salary_min,
+            avg_salary_max    = EXCLUDED.avg_salary_max,
+            median_salary_min = EXCLUDED.median_salary_min,
+            median_salary_max = EXCLUDED.median_salary_max;
+        """,
+        (today,) + (today,) * 8,
+    )
+    stats_rows = cur.rowcount
+
+    cur.execute(
+        """
+        DELETE FROM company_skills
+        WHERE snapshot_date = %s;
+        """,
+        (today,),
+    )
+    cur.execute(
+        """
+        INSERT INTO company_skills (
+            company_id, snapshot_date, skill_name, mention_count, percentage
+        )
+        SELECT
+            j.company_id,
+            %s,
+            s.skill,
+            COUNT(*),
+            ROUND(100.0 * COUNT(*) / ac.total, 2)
+        FROM jobs j,
+             LATERAL unnest(j.skills) AS s(skill),
+             (SELECT company_id, COUNT(*) AS total
+              FROM jobs WHERE is_active GROUP BY company_id) ac
+        WHERE j.is_active
+          AND j.company_id = ac.company_id
+        GROUP BY j.company_id, s.skill, ac.total
+        ON CONFLICT (company_id, snapshot_date, skill_name) DO UPDATE SET
+            mention_count = EXCLUDED.mention_count,
+            percentage    = EXCLUDED.percentage;
+        """,
+        (today,),
+    )
+    skills_rows = cur.rowcount
+
+    cur.execute(
+        """
+        DELETE FROM company_departments
+        WHERE snapshot_date = %s;
+        """,
+        (today,),
+    )
+    cur.execute(
+        """
+        INSERT INTO company_departments (
+            company_id, snapshot_date, department_name,
+            active_job_count, percentage
+        )
+        SELECT
+            j.company_id,
+            %s,
+            d.dept,
+            COUNT(*),
+            ROUND(100.0 * COUNT(*) / ac.total, 2)
+        FROM jobs j,
+             LATERAL unnest(j.departments) AS d(dept),
+             (SELECT company_id, COUNT(*) AS total
+              FROM jobs WHERE is_active GROUP BY company_id) ac
+        WHERE j.is_active
+          AND j.company_id = ac.company_id
+        GROUP BY j.company_id, d.dept, ac.total
+        ON CONFLICT (company_id, snapshot_date, department_name) DO UPDATE SET
+            active_job_count = EXCLUDED.active_job_count,
+            percentage       = EXCLUDED.percentage;
+        """,
+        (today,),
+    )
+    departments_rows = cur.rowcount
+
+    conn.commit()
+    summary = {
+        "snapshot_date": str(today),
+        "stats_rows": stats_rows,
+        "skills_rows": skills_rows,
+        "departments_rows": departments_rows,
+    }
+    logger.info(f"Company analytics refreshed: {summary}")
+    return summary
+
+
 def clean_url(url: str) -> str:
     """Strip query parameters and fragments from a URL."""
     if not url:

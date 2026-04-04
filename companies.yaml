@@ -1,25 +1,75 @@
 companies:
-  - name: anthropic_greenhouse
+  # -- Dev Tools & Infrastructure --
+  - name: stripe_greenhouse
     scraper_type: greenhouse
-    url: https://boards.greenhouse.io/anthropic
+    url: https://boards.greenhouse.io/stripe
     enabled: true
 
-  - name: airbnb_greenhouse
+  - name: figma_greenhouse
     scraper_type: greenhouse
-    url: https://boards.greenhouse.io/airbnb
+    url: https://boards.greenhouse.io/figma
     enabled: true
 
-  - name: coinbase_greenhouse
+  - name: databricks_greenhouse
     scraper_type: greenhouse
-    url: https://boards.greenhouse.io/coinbase
+    url: https://boards.greenhouse.io/databricks
     enabled: true
 
-  - name: doordash_greenhouse
+  - name: datadog_greenhouse
     scraper_type: greenhouse
-    url: https://boards.greenhouse.io/doordashusa
+    url: https://boards.greenhouse.io/datadog
     enabled: true
 
-  - name: gitlab_greenhouse
+  - name: cloudflare_greenhouse
     scraper_type: greenhouse
-    url: https://boards.greenhouse.io/gitlab
+    url: https://boards.greenhouse.io/cloudflare
+    enabled: true
+
+  # -- Consumer / Social --
+  - name: discord_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/discord
+    enabled: true
+
+  - name: reddit_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/reddit
+    enabled: true
+
+  - name: duolingo_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/duolingo
+    enabled: true
+
+  - name: lyft_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/lyft
+    enabled: true
+
+  - name: squarespace_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/squarespace
+    enabled: true
+
+  # -- Productivity / SaaS --
+  - name: asana_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/asana
+    enabled: true
+
+  # -- Fintech --
+  - name: robinhood_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/robinhood
+    enabled: true
+
+  # -- AI / Data --
+  - name: scaleai_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/scaleai
+    enabled: true
+
+  - name: c3ai_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/c3iot
     enabled: true
