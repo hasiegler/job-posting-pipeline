@@ -1,3 +1,5 @@
+import os
+
 from airflow import DAG
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +16,15 @@ from datawarehouse.dwh import (
 )
 COMPANIES_FILE = "companies.yaml"
 
+
+def _dag_schedule() -> str | None:
+    """Cron string, or None for manual-only. Override via AIRFLOW_DAG_SCHEDULE in .env."""
+    raw = os.environ.get("AIRFLOW_DAG_SCHEDULE", "0 12 * * *").strip()
+    if not raw or raw.lower() in ("none", "manual", "off"):
+        return None
+    return raw
+
+
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
@@ -28,7 +39,7 @@ with DAG(
     dag_id='company_json_scraper',
     default_args=default_args,
     description='DAG to produce json files for each company in companies.yaml',
-    schedule='0 12 * * *',  # 12:00 PM UTC
+    schedule=_dag_schedule(),
     catchup=False,
     max_active_runs=1,
     dagrun_timeout=timedelta(hours=1),

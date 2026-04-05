@@ -7,6 +7,8 @@ import logging
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
+from psycopg2.extras import execute_values, Json
+
 from extraction import EXTRACTION_VERSION
 from extraction.salary import extract_salary
 from extraction.remote_policy import extract_remote_policy
@@ -179,49 +181,31 @@ def snapshot_changed_jobs(conn, cur, changed_jobs: list[dict]) -> dict:
     )
     rows = cur.fetchall()
 
-    for row in rows:
-        change_info = change_map[row["job_id"]]
-        cur.execute(
-            """
-            INSERT INTO job_history (
-                job_id, company_id, source_job_id, change_type, changed_fields,
-                title, source_url, location, departments, offices, language,
-                description_text, description_html, skills,
-                salary_min, salary_max, salary_currency, salary_period,
-                remote_policy, experience_level, education_required, benefits,
-                first_published_at, is_active
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-            )
-            """,
-            (
-                row["job_id"],
-                row["company_id"],
-                row["source_job_id"],
-                change_info["change_type"],
-                change_info["changed_fields"],
-                row["title"],
-                row["source_url"],
-                row["location"],
-                row["departments"],
-                row["offices"],
-                row["language"],
-                row["description_text"],
-                row["description_html"],
-                row["skills"],
-                row["salary_min"],
-                row["salary_max"],
-                row["salary_currency"],
-                row["salary_period"],
-                row["remote_policy"],
-                row["experience_level"],
-                row["education_required"],
-                row["benefits"],
-                row["first_published_at"],
-                row["is_active"],
-            ),
+    execute_values(cur, """
+        INSERT INTO job_history (
+            job_id, company_id, source_job_id, change_type, changed_fields,
+            title, source_url, location, departments, offices, language,
+            description_text, description_html, skills,
+            salary_min, salary_max, salary_currency, salary_period,
+            remote_policy, experience_level, education_required, benefits,
+            first_published_at, is_active
+        ) VALUES %s
+    """, [
+        (
+            row["job_id"], row["company_id"], row["source_job_id"],
+            change_map[row["job_id"]]["change_type"],
+            change_map[row["job_id"]]["changed_fields"],
+            row["title"], row["source_url"], row["location"],
+            row["departments"], row["offices"], row["language"],
+            row["description_text"], row["description_html"],
+            row["skills"], row["salary_min"], row["salary_max"],
+            row["salary_currency"], row["salary_period"],
+            row["remote_policy"], row["experience_level"],
+            row["education_required"], row["benefits"],
+            row["first_published_at"], row["is_active"],
         )
+        for row in rows
+    ])
 
     conn.commit()
     return {"snapshots_written": len(rows)}
@@ -278,17 +262,16 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
         ),
     )
 
-    for row in company_metrics:
-        cur.execute(
+    if company_metrics:
+        execute_values(
+            cur,
             """
             INSERT INTO company_run_metrics (
                 dag_id, run_id, run_started_at, company_id, company_name,
                 scraped_jobs, staged_jobs, new_jobs, updated_jobs, unchanged_jobs,
                 closed_jobs, extraction_attempted, salary_found, remote_policy_found,
                 skills_found, updated_at
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
-            )
+            ) VALUES %s
             ON CONFLICT (dag_id, run_id, company_id) DO UPDATE SET
                 run_started_at = EXCLUDED.run_started_at,
                 company_name = EXCLUDED.company_name,
@@ -302,25 +285,21 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
                 salary_found = EXCLUDED.salary_found,
                 remote_policy_found = EXCLUDED.remote_policy_found,
                 skills_found = EXCLUDED.skills_found,
-                updated_at = NOW();
+                updated_at = NOW()
             """,
-            (
-                row["dag_id"],
-                row["run_id"],
-                row["run_started_at"],
-                row["company_id"],
-                row["company_name"],
-                row["scraped_jobs"],
-                row["staged_jobs"],
-                row["new_jobs"],
-                row["updated_jobs"],
-                row["unchanged_jobs"],
-                row["closed_jobs"],
-                row["extraction_attempted"],
-                row["salary_found"],
-                row["remote_policy_found"],
-                row["skills_found"],
-            ),
+            [
+                (
+                    row["dag_id"], row["run_id"], row["run_started_at"],
+                    row["company_id"], row["company_name"],
+                    row["scraped_jobs"], row["staged_jobs"],
+                    row["new_jobs"], row["updated_jobs"], row["unchanged_jobs"],
+                    row["closed_jobs"], row["extraction_attempted"],
+                    row["salary_found"], row["remote_policy_found"],
+                    row["skills_found"],
+                )
+                for row in company_metrics
+            ],
+            template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())",
         )
 
     conn.commit()
@@ -510,7 +489,15 @@ NORMALIZERS = {
 
 
 def process_staging_to_jobs(conn, cur) -> dict:
-    """Process all unprocessed staging_jobs rows into the jobs table."""
+    """Process all unprocessed staging_jobs rows into the jobs table.
+
+    Uses bulk SQL operations instead of row-by-row queries:
+      1. Normalize every staging row in Python.
+      2. Load normalized data into a temp table.
+      3. Single LEFT JOIN to classify rows as new / changed / unchanged.
+      4. Bulk INSERT, UPDATE, and closed-detection via set-based SQL.
+      5. One UPDATE to mark all staging rows processed.
+    """
     cur.execute("""
         SELECT job_id, company_id, scraper_type, source_job_id, raw_data, scraped_at
         FROM staging_jobs
@@ -530,15 +517,13 @@ def process_staging_to_jobs(conn, cur) -> dict:
             "changed_jobs": [],
         }
 
-    inserted = 0
-    updated = 0
-    unchanged = 0
+    # -- Phase 1: normalise in Python, track companies --------------------
+    all_staging_ids = [r["job_id"] for r in staging_rows]
+    normalized = []
     companies_seen = set()
-    company_metrics = {}
-    changed_jobs = []
+    company_metrics: dict[int, dict] = {}
 
     for row in staging_rows:
-        staging_id = row["job_id"]
         company_id = row["company_id"]
         scraper_type = row["scraper_type"]
         raw_data = row["raw_data"]
@@ -550,145 +535,250 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
         normalizer = NORMALIZERS.get(scraper_type)
         if not normalizer:
-            logger.warning(f"No normalizer for scraper_type '{scraper_type}', skipping staging_id={staging_id}")
+            logger.warning(
+                f"No normalizer for scraper_type '{scraper_type}', "
+                f"skipping staging_id={row['job_id']}"
+            )
             continue
 
-        normalized = normalizer(raw_data)
+        norm = normalizer(raw_data)
+        normalized.append({
+            "staging_id": row["job_id"],
+            "company_id": company_id,
+            "scraper_type": scraper_type,
+            **norm,
+        })
 
-        cur.execute("""
-            SELECT job_id, source_url, title, location, departments, offices,
-                   language, description_text, description_html, first_published_at,
-                   is_active
-            FROM jobs
-            WHERE company_id = %s AND source_job_id = %s
-        """, (company_id, normalized["source_job_id"]))
-        existing = cur.fetchone()
+    if not normalized:
+        cur.execute(
+            "UPDATE staging_jobs SET processed = TRUE, processed_at = NOW() "
+            "WHERE job_id = ANY(%s)",
+            (all_staging_ids,),
+        )
+        conn.commit()
+        return {
+            "inserted": 0, "updated": 0, "unchanged": 0, "closed": 0,
+            "company_metrics": [], "changed_jobs": [],
+        }
 
-        if existing:
-            changes = {}
-            changed_fields = []
-            compare_fields = [
-                "source_url", "title", "location", "departments", "offices",
-                "language", "description_text", "description_html", "first_published_at",
-            ]
-            for field in compare_fields:
-                new_val = normalized.get(field)
-                old_val = existing.get(field)
-                if new_val != old_val:
-                    changes[field] = new_val
-                    changed_fields.append(field)
+    # Deduplicate: keep latest staging row per (company_id, source_job_id)
+    seen_keys: dict[tuple, dict] = {}
+    for norm in normalized:
+        seen_keys[(norm["company_id"], norm["source_job_id"])] = norm
+    deduped = list(seen_keys.values())
 
-            reactivated = False
-            if not existing["is_active"]:
-                changes["is_active"] = True
-                changes["date_closed"] = None
-                reactivated = True
-                logger.info(f"Reactivated job {normalized['source_job_id']}")
+    # -- Phase 2: load into temp table ------------------------------------
+    cur.execute("""
+        CREATE TEMP TABLE _norm (
+            staging_id         INTEGER,
+            company_id         INTEGER,
+            scraper_type       TEXT,
+            source_job_id      TEXT,
+            source_url         TEXT,
+            title              TEXT,
+            location           TEXT,
+            departments        TEXT[],
+            offices            TEXT[],
+            language           TEXT,
+            description_text   TEXT,
+            description_html   TEXT,
+            first_published_at TIMESTAMPTZ
+        ) ON COMMIT DROP
+    """)
 
-            if changes:
-                changes["extracted_at"] = None
-                changes["extraction_version"] = None
-                set_clauses = [f"{f} = %s" for f in changes]
-                set_clauses.append("last_seen = NOW()")
-                set_clauses.append("updated_at = NOW()")
-                values = list(changes.values())
-                values.append(existing["job_id"])
-                cur.execute(
-                    f"UPDATE jobs SET {', '.join(set_clauses)} WHERE job_id = %s",
-                    values,
-                )
-                updated += 1
-                company_metrics[company_id]["updated"] += 1
-                change_type = "reactivated" if reactivated else "updated"
-                changed_jobs.append(
-                    {
-                        "job_id": existing["job_id"],
-                        "change_type": change_type,
-                        "changed_fields": changed_fields,
-                    }
-                )
-                logger.info(f"Updated job {normalized['source_job_id']}: {list(changes.keys())}")
-            else:
-                cur.execute(
-                    "UPDATE jobs SET last_seen = NOW() WHERE job_id = %s",
-                    (existing["job_id"],)
-                )
-                unchanged += 1
-                company_metrics[company_id]["unchanged"] += 1
+    execute_values(cur, """
+        INSERT INTO _norm (
+            staging_id, company_id, scraper_type, source_job_id, source_url,
+            title, location, departments, offices, language,
+            description_text, description_html, first_published_at
+        ) VALUES %s
+    """, [
+        (
+            r["staging_id"], r["company_id"], r["scraper_type"],
+            r["source_job_id"], r["source_url"], r["title"], r["location"],
+            r["departments"], r["offices"], r["language"],
+            r["description_text"], r["description_html"],
+            r["first_published_at"],
+        )
+        for r in deduped
+    ])
+
+    # -- Phase 3: classify with a single JOIN -----------------------------
+    cur.execute("""
+        SELECT
+            n.staging_id, n.company_id, n.scraper_type, n.source_job_id,
+            n.source_url,        n.title,        n.location,
+            n.departments,       n.offices,      n.language,
+            n.description_text,  n.description_html, n.first_published_at,
+            j.job_id           AS existing_job_id,
+            j.source_url       AS old_source_url,
+            j.title            AS old_title,
+            j.location         AS old_location,
+            j.departments      AS old_departments,
+            j.offices          AS old_offices,
+            j.language         AS old_language,
+            j.description_text AS old_description_text,
+            j.description_html AS old_description_html,
+            j.first_published_at AS old_first_published_at,
+            j.is_active        AS old_is_active
+        FROM _norm n
+        LEFT JOIN jobs j
+            ON  j.company_id    = n.company_id
+            AND j.source_job_id = n.source_job_id
+    """)
+    classified = cur.fetchall()
+
+    compare_fields = [
+        "source_url", "title", "location", "departments", "offices",
+        "language", "description_text", "description_html",
+        "first_published_at",
+    ]
+
+    new_staging_ids: list[int] = []
+    changed_job_ids: list[int] = []
+    unchanged_job_ids: list[int] = []
+    changed_jobs: list[dict] = []
+
+    for row in classified:
+        cid = row["company_id"]
+        if row["existing_job_id"] is None:
+            new_staging_ids.append(row["staging_id"])
         else:
-            cur.execute("""
-                INSERT INTO jobs (
-                    company_id, scraper_type, source_job_id, source_url,
-                    title, location, departments, offices, language,
-                    description_text, description_html, first_published_at,
-                    first_seen, last_seen, is_active
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), TRUE)
-                RETURNING job_id
-            """, (
-                company_id, scraper_type,
-                normalized["source_job_id"], normalized["source_url"],
-                normalized["title"], normalized["location"],
-                normalized["departments"], normalized["offices"],
-                normalized["language"], normalized["description_text"],
-                normalized["description_html"], normalized["first_published_at"],
-            ))
-            new_job = cur.fetchone()
-            inserted += 1
-            company_metrics[company_id]["inserted"] += 1
-            changed_jobs.append(
-                {
-                    "job_id": new_job["job_id"],
-                    "change_type": "inserted",
-                    "changed_fields": [],
-                }
-            )
+            changed_fields = [
+                f for f in compare_fields
+                if row[f] != row[f"old_{f}"]
+            ]
+            reactivated = not row["old_is_active"]
 
+            if changed_fields or reactivated:
+                changed_job_ids.append(row["existing_job_id"])
+                company_metrics[cid]["updated"] += 1
+                change_type = "reactivated" if reactivated else "updated"
+                changed_jobs.append({
+                    "job_id": row["existing_job_id"],
+                    "change_type": change_type,
+                    "changed_fields": changed_fields,
+                })
+                if reactivated:
+                    logger.info(f"Reactivated job {row['source_job_id']}")
+                else:
+                    logger.info(
+                        f"Updated job {row['source_job_id']}: {changed_fields}"
+                    )
+            else:
+                unchanged_job_ids.append(row["existing_job_id"])
+                company_metrics[cid]["unchanged"] += 1
+
+    # -- Phase 4: bulk INSERT new jobs ------------------------------------
+    inserted = 0
+    if new_staging_ids:
         cur.execute("""
-            UPDATE staging_jobs SET processed = TRUE, processed_at = NOW()
-            WHERE job_id = %s
-        """, (staging_id,))
+            INSERT INTO jobs (
+                company_id, scraper_type, source_job_id, source_url,
+                title, location, departments, offices, language,
+                description_text, description_html, first_published_at,
+                first_seen, last_seen, is_active
+            )
+            SELECT
+                n.company_id, n.scraper_type, n.source_job_id, n.source_url,
+                n.title, n.location, n.departments, n.offices, n.language,
+                n.description_text, n.description_html, n.first_published_at,
+                NOW(), NOW(), TRUE
+            FROM _norm n
+            WHERE n.staging_id = ANY(%s)
+            RETURNING job_id, company_id
+        """, (new_staging_ids,))
+        new_rows = cur.fetchall()
+        inserted = len(new_rows)
+        for r in new_rows:
+            company_metrics[r["company_id"]]["inserted"] += 1
+            changed_jobs.append({
+                "job_id": r["job_id"],
+                "change_type": "inserted",
+                "changed_fields": [],
+            })
 
-    # Mark closed jobs: active jobs not seen today for each company scraped
+    # -- Phase 5: bulk UPDATE changed / reactivated jobs ------------------
+    if changed_job_ids:
+        cur.execute("""
+            UPDATE jobs SET
+                source_url         = n.source_url,
+                title              = n.title,
+                location           = n.location,
+                departments        = n.departments,
+                offices            = n.offices,
+                language           = n.language,
+                description_text   = n.description_text,
+                description_html   = n.description_html,
+                first_published_at = n.first_published_at,
+                is_active          = TRUE,
+                date_closed        = NULL,
+                extracted_at       = NULL,
+                extraction_version = NULL,
+                last_seen          = NOW(),
+                updated_at         = NOW()
+            FROM _norm n
+            WHERE jobs.company_id    = n.company_id
+              AND jobs.source_job_id = n.source_job_id
+              AND jobs.job_id = ANY(%s)
+        """, (changed_job_ids,))
+
+    # -- Phase 6: bulk UPDATE unchanged jobs (touch last_seen) ------------
+    if unchanged_job_ids:
+        cur.execute(
+            "UPDATE jobs SET last_seen = NOW() WHERE job_id = ANY(%s)",
+            (unchanged_job_ids,),
+        )
+
+    # -- Phase 7: closed jobs — single query across all companies ---------
     closed = 0
-    for company_id, scraper_type in companies_seen:
+    if companies_seen:
+        cs_company_ids = [p[0] for p in companies_seen]
+        cs_scraper_types = [p[1] for p in companies_seen]
         cur.execute("""
             UPDATE jobs
             SET is_active = FALSE, date_closed = NOW(), updated_at = NOW()
-            WHERE company_id = %s
-              AND scraper_type = %s
-              AND is_active = TRUE
-              AND last_seen < CURRENT_DATE
-            RETURNING job_id
-        """, (company_id, scraper_type))
+            FROM unnest(%s::INTEGER[], %s::TEXT[]) AS v(vid, vtype)
+            WHERE jobs.company_id   = v.vid
+              AND jobs.scraper_type = v.vtype
+              AND jobs.is_active    = TRUE
+              AND jobs.last_seen    < CURRENT_DATE
+            RETURNING jobs.job_id, jobs.company_id
+        """, (cs_company_ids, cs_scraper_types))
         closed_rows = cur.fetchall()
-        closed += len(closed_rows)
-        company_metrics.setdefault(company_id, _empty_company_metrics())
-        company_metrics[company_id]["closed"] += len(closed_rows)
-        for row in closed_rows:
-            changed_jobs.append(
-                {
-                    "job_id": row["job_id"],
-                    "change_type": "closed",
-                    "changed_fields": [],
-                }
-            )
+        closed = len(closed_rows)
+        for r in closed_rows:
+            company_metrics.setdefault(r["company_id"], _empty_company_metrics())
+            company_metrics[r["company_id"]]["closed"] += 1
+            changed_jobs.append({
+                "job_id": r["job_id"],
+                "change_type": "closed",
+                "changed_fields": [],
+            })
+
+    # -- Phase 8: mark every staging row processed in one statement -------
+    cur.execute(
+        "UPDATE staging_jobs SET processed = TRUE, processed_at = NOW() "
+        "WHERE job_id = ANY(%s)",
+        (all_staging_ids,),
+    )
 
     conn.commit()
 
     summary = {
         "inserted": inserted,
-        "updated": updated,
-        "unchanged": unchanged,
+        "updated": len(changed_job_ids),
+        "unchanged": len(unchanged_job_ids),
         "closed": closed,
         "company_metrics": [
             {
-                "company_id": company_id,
-                "inserted": metrics["inserted"],
-                "updated": metrics["updated"],
-                "unchanged": metrics["unchanged"],
-                "closed": metrics["closed"],
+                "company_id": cid,
+                "inserted": m["inserted"],
+                "updated": m["updated"],
+                "unchanged": m["unchanged"],
+                "closed": m["closed"],
             }
-            for company_id, metrics in company_metrics.items()
+            for cid, m in company_metrics.items()
         ],
         "changed_jobs": changed_jobs,
     }
@@ -697,14 +787,19 @@ def process_staging_to_jobs(conn, cur) -> dict:
 
 
 def extract_fields_from_jobs(conn, cur) -> dict:
-    """Run field extraction on all jobs that haven't been extracted yet."""
+    """Run field extraction on all jobs that haven't been extracted yet.
+
+    Extraction itself (salary, remote policy, skills) must run in Python,
+    but the resulting updates are applied in a single bulk UPDATE via a
+    temp table rather than one UPDATE per row.
+    """
     skill_matchers = build_skill_matchers(cur)
 
     cur.execute("""
         SELECT job_id, company_id, title, description_text, location
         FROM jobs
         WHERE extracted_at IS NULL
-        AND is_active = TRUE
+          AND is_active = TRUE
         ORDER BY job_id
     """)
     rows = cur.fetchall()
@@ -723,7 +818,8 @@ def extract_fields_from_jobs(conn, cur) -> dict:
     salary_found = 0
     remote_policy_found = 0
     skills_found = 0
-    company_metrics = {}
+    company_metrics: dict[int, dict] = {}
+    extraction_tuples: list[tuple] = []
 
     for row in rows:
         job_id = row["job_id"]
@@ -731,52 +827,75 @@ def extract_fields_from_jobs(conn, cur) -> dict:
         title = row["title"]
         desc = row["description_text"]
         loc = row["location"]
+
         company_metrics.setdefault(company_id, _empty_company_metrics())
         company_metrics[company_id]["extraction_attempted"] += 1
 
         salary = extract_salary(desc)
         remote_policy = extract_remote_policy(desc, loc)
-        skills = extract_skills(" ".join(part for part in [title, desc] if part), skill_matchers)
+        skills = extract_skills(
+            " ".join(part for part in [title, desc] if part), skill_matchers
+        )
 
-        fields = {
-            "extracted_at": "NOW()",
-            "extraction_version": EXTRACTION_VERSION,
-            "updated_at": "NOW()",
-        }
-        params = []
-
+        s_min = s_max = s_curr = s_period = None
         if salary:
-            fields["salary_min"] = salary.salary_min
-            fields["salary_max"] = salary.salary_max
-            fields["salary_currency"] = salary.salary_currency
-            fields["salary_period"] = salary.salary_period
+            s_min = salary.salary_min
+            s_max = salary.salary_max
+            s_curr = salary.salary_currency
+            s_period = salary.salary_period
             salary_found += 1
             company_metrics[company_id]["salary_found"] += 1
 
+        rp = None
         if remote_policy:
-            fields["remote_policy"] = remote_policy
+            rp = remote_policy
             remote_policy_found += 1
             company_metrics[company_id]["remote_policy_found"] += 1
 
-        fields["skills"] = skills
         if skills:
             skills_found += 1
             company_metrics[company_id]["skills_found"] += 1
 
-        set_clauses = []
-        for col, val in fields.items():
-            if val == "NOW()":
-                set_clauses.append(f"{col} = NOW()")
-            else:
-                set_clauses.append(f"{col} = %s")
-                params.append(val)
-
-        params.append(job_id)
-        cur.execute(
-            f"UPDATE jobs SET {', '.join(set_clauses)} WHERE job_id = %s",
-            params,
-        )
+        extraction_tuples.append((
+            job_id, s_min, s_max, s_curr, s_period,
+            rp, skills, EXTRACTION_VERSION,
+        ))
         processed += 1
+
+    # -- Bulk UPDATE via temp table ---------------------------------------
+    cur.execute("""
+        CREATE TEMP TABLE _extraction (
+            job_id             INTEGER,
+            salary_min         NUMERIC,
+            salary_max         NUMERIC,
+            salary_currency    TEXT,
+            salary_period      TEXT,
+            remote_policy      TEXT,
+            skills             TEXT[],
+            extraction_version TEXT
+        ) ON COMMIT DROP
+    """)
+
+    execute_values(
+        cur,
+        "INSERT INTO _extraction VALUES %s",
+        extraction_tuples,
+    )
+
+    cur.execute("""
+        UPDATE jobs SET
+            salary_min         = COALESCE(e.salary_min, jobs.salary_min),
+            salary_max         = COALESCE(e.salary_max, jobs.salary_max),
+            salary_currency    = COALESCE(e.salary_currency, jobs.salary_currency),
+            salary_period      = COALESCE(e.salary_period, jobs.salary_period),
+            remote_policy      = COALESCE(e.remote_policy, jobs.remote_policy),
+            skills             = e.skills,
+            extraction_version = e.extraction_version,
+            extracted_at       = NOW(),
+            updated_at         = NOW()
+        FROM _extraction e
+        WHERE jobs.job_id = e.job_id
+    """)
 
     conn.commit()
 
@@ -836,21 +955,21 @@ def insert_staging_jobs(conn, cur, data: dict) -> int:
     company_id = company_row["company_id"]
     scraper_type = company_row["scraper_type"]
 
-    inserted = 0
-    for job in jobs:
-        cur.execute("""
-            INSERT INTO staging_jobs (company_id, scraper_type, source_job_id, source_url, raw_data, scraped_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (
-            company_id,
-            scraper_type,
-            str(job["id"]),
-            job.get("url"),
-            json.dumps(job),
-            scraped_at,
-        ))
-        inserted += 1
+    if not jobs:
+        conn.commit()
+        return 0
 
+    execute_values(cur, """
+        INSERT INTO staging_jobs
+            (company_id, scraper_type, source_job_id, source_url, raw_data, scraped_at)
+        VALUES %s
+    """, [
+        (company_id, scraper_type, str(job["id"]), job.get("url"),
+         Json(job), scraped_at)
+        for job in jobs
+    ])
+
+    inserted = len(jobs)
     conn.commit()
     logger.info(f"Inserted {inserted} jobs into staging_jobs for {company_name}")
     return inserted

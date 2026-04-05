@@ -9,6 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from psycopg2.extras import execute_values
+
 from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
 
 
@@ -329,18 +331,15 @@ def _build_skill_records():
 def seed_skills():
     conn, cur = get_conn_cursor()
 
-    cur.executemany(
-        """
+    execute_values(cur, """
         INSERT INTO skills (skill_name, category, aliases)
-        VALUES (%s, %s, %s)
+        VALUES %s
         ON CONFLICT (skill_name, category)
         DO UPDATE SET
             aliases = EXCLUDED.aliases,
             is_active = TRUE,
-            updated_at = NOW();
-        """,
-        _build_skill_records(),
-    )
+            updated_at = NOW()
+    """, _build_skill_records())
 
     conn.commit()
     print("skills table seeded successfully.")

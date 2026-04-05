@@ -13,6 +13,8 @@ except ImportError:
         func.function = func
         return func
 
+from psycopg2.extras import execute_values, execute_batch
+
 from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
 
 COMPANIES_FILE = "companies.yaml"
@@ -31,10 +33,16 @@ def sync_companies(path: str = COMPANIES_FILE) -> dict:
 
     conn, cur = get_conn_cursor()
 
-    inserted = 0
-    updated = 0
+    # Fetch all existing companies in a single query
+    cur.execute(
+        "SELECT company_name, scraper_type, base_url, enabled, canonical_name "
+        "FROM companies"
+    )
+    existing = {row["company_name"]: row for row in cur.fetchall()}
 
     yaml_names = set()
+    to_insert: list[tuple] = []
+    to_update: list[tuple] = []
 
     for company in yaml_companies:
         company_name = company["name"]
@@ -42,55 +50,53 @@ def sync_companies(path: str = COMPANIES_FILE) -> dict:
         base_url = company.get("url", "")
         enabled = company.get("enabled", False)
         canonical_name = company_name.replace(f"_{scraper_type}", "")
-
         yaml_names.add(company_name)
 
-        cur.execute(
-            """SELECT company_id, scraper_type, base_url, enabled, canonical_name
-               FROM companies WHERE company_name = %s""",
-            (company_name,)
-        )
-        existing = cur.fetchone()
-
-        if existing:
+        if company_name in existing:
+            ex = existing[company_name]
             changed = (
-                existing["scraper_type"] != scraper_type
-                or existing["base_url"] != base_url
-                or existing["enabled"] != enabled
-                or existing["canonical_name"] != canonical_name
+                ex["scraper_type"] != scraper_type
+                or ex["base_url"] != base_url
+                or ex["enabled"] != enabled
+                or ex["canonical_name"] != canonical_name
             )
             if changed:
-                cur.execute("""
-                    UPDATE companies
-                    SET scraper_type = %s,
-                        base_url = %s,
-                        enabled = %s,
-                        canonical_name = %s,
-                        updated_at = NOW()
-                    WHERE company_name = %s
-                """, (scraper_type, base_url, enabled, canonical_name, company_name))
-                updated += 1
+                to_update.append(
+                    (scraper_type, base_url, enabled, canonical_name, company_name)
+                )
                 print(f"  Updated: {company_name}")
             else:
                 print(f"  No changes: {company_name}")
         else:
-            cur.execute("""
-                INSERT INTO companies (company_name, scraper_type, base_url, enabled, canonical_name)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (company_name, scraper_type, base_url, enabled, canonical_name))
-            inserted += 1
+            to_insert.append(
+                (company_name, scraper_type, base_url, enabled, canonical_name)
+            )
             print(f"  Inserted: {company_name}")
 
-    # Check for companies in DB but not in YAML
-    cur.execute("SELECT company_name FROM companies")
-    db_companies = {row["company_name"] for row in cur.fetchall()}
-    orphaned = db_companies - yaml_names
+    if to_insert:
+        execute_values(cur, """
+            INSERT INTO companies
+                (company_name, scraper_type, base_url, enabled, canonical_name)
+            VALUES %s
+        """, to_insert)
+
+    if to_update:
+        execute_batch(cur, """
+            UPDATE companies
+            SET scraper_type = %s, base_url = %s, enabled = %s,
+                canonical_name = %s, updated_at = NOW()
+            WHERE company_name = %s
+        """, to_update)
+
+    orphaned = set(existing.keys()) - yaml_names
     for name in orphaned:
         print(f"  WARNING: '{name}' exists in DB but not in companies.yaml")
 
     conn.commit()
     close_conn_cursor(conn, cur)
 
+    inserted = len(to_insert)
+    updated = len(to_update)
     summary = {"inserted": inserted, "updated": updated, "warnings": len(orphaned)}
     print(f"\nSync complete: {inserted} inserted, {updated} updated, {len(orphaned)} warnings")
     return summary
