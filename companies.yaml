@@ -1,4 +1,29 @@
 companies:
+  - name: anthropic_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/anthropic
+    enabled: true
+
+  - name: airbnb_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/airbnb
+    enabled: true
+
+  - name: coinbase_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/coinbase
+    enabled: true
+
+  - name: doordash_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/doordashusa
+    enabled: true
+
+  - name: gitlab_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/gitlab
+    enabled: true
+  
   # -- Dev Tools & Infrastructure --
   - name: stripe_greenhouse
     scraper_type: greenhouse

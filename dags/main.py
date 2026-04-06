@@ -55,7 +55,10 @@ with DAG(
     s3_paths = save_results.expand(result=company_results)
 
     # Step 2: Load from S3 into staging_jobs
-    staging = update_staging_jobs.expand(s3_path=s3_paths)
+    # Throttle concurrency to avoid exhausting Supabase's connection pool.
+    staging = update_staging_jobs.override(
+        max_active_tis_per_dagrun=4,
+    ).expand(s3_path=s3_paths)
 
     # Step 3: Process staging into jobs table, mark closed jobs
     jobs = update_jobs_table()
