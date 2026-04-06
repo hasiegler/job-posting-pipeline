@@ -1,4 +1,5 @@
 companies:
+
   - name: anthropic_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/anthropic
@@ -23,8 +24,7 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/gitlab
     enabled: true
-  
-  # -- Dev Tools & Infrastructure --
+
   - name: stripe_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/stripe
@@ -50,7 +50,6 @@ companies:
     url: https://boards.greenhouse.io/cloudflare
     enabled: true
 
-  # -- Consumer / Social --
   - name: discord_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/discord
@@ -76,19 +75,16 @@ companies:
     url: https://boards.greenhouse.io/squarespace
     enabled: true
 
-  # -- Productivity / SaaS --
   - name: asana_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/asana
     enabled: true
 
-  # -- Fintech --
   - name: robinhood_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/robinhood
     enabled: true
 
-  # -- AI / Data --
   - name: scaleai_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/scaleai
@@ -97,4 +93,114 @@ companies:
   - name: c3ai_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/c3iot
+    enabled: true
+
+  - name: vercel_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/vercel
+    enabled: true
+
+  - name: airtable_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/airtable
+    enabled: true
+
+  - name: instacart_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/instacart
+    enabled: true
+
+  - name: cockroachlabs_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/cockroachlabs
+    enabled: true
+
+  - name: twilio_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/twilio
+    enabled: true
+
+  - name: pagerduty_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/pagerduty
+    enabled: true
+
+  - name: rubrik_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/rubrik
+    enabled: true
+
+  - name: gusto_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/gusto
+    enabled: true
+
+  - name: brex_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/brex
+    enabled: true
+
+  - name: coupang_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/coupang
+    enabled: true
+
+  - name: okta_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/okta
+    enabled: true
+
+  - name: metronome_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/metronome
+    enabled: true
+
+  - name: pinterest_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/pinterest
+    enabled: true
+
+  - name: dropbox_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/dropbox
+    enabled: true
+
+  - name: twitch_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/twitch
+    enabled: true
+
+  - name: hubspot_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/hubspot
+    enabled: true
+
+  - name: mixpanel_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/mixpanel
+    enabled: true
+
+  - name: coursera_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/coursera
+    enabled: true
+
+  - name: elastic_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/elastic
+    enabled: true
+
+  - name: mongodb_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/mongodb
+    enabled: true
+
+  - name: affirm_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/affirm
+    enabled: true
+
+  - name: roblox_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/roblox
     enabled: true

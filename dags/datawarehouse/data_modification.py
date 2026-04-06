@@ -306,11 +306,23 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
 
 
 def refresh_company_analytics(conn, cur) -> dict:
-    """Snapshot company-level analytics from the current state of the jobs table."""
+    """Snapshot company-level analytics from the current state of the jobs table.
+
+    closed_* and net_change_* are only populated when the pipeline has at least
+    one recorded run that predates the lookback window (7 or 30 days).  Before
+    that history exists, those counts would be artificially low (we wouldn't
+    know what closed because we had no prior baseline), so they are left NULL.
+    """
     today = datetime.now().date()
 
     cur.execute(
         """
+        WITH first_run AS (
+            -- Earliest run recorded per company across all DAG runs
+            SELECT company_id, MIN(run_started_at)::DATE AS first_run_date
+            FROM company_run_metrics
+            GROUP BY company_id
+        )
         INSERT INTO company_stats (
             company_id, snapshot_date, active_jobs,
             posted_7d, posted_30d, closed_7d, closed_30d,
@@ -320,28 +332,41 @@ def refresh_company_analytics(conn, cur) -> dict:
             median_salary_min, median_salary_max
         )
         SELECT
-            company_id,
+            j.company_id,
             %s,
-            COUNT(*) FILTER (WHERE is_active),
-            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '7 days'),
-            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '30 days'),
-            COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '7 days'),
-            COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '30 days'),
-            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '7 days')
-                - COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '7 days'),
-            COUNT(*) FILTER (WHERE first_published_at >= %s - INTERVAL '30 days')
-                - COUNT(*) FILTER (WHERE date_closed >= %s - INTERVAL '30 days'),
-            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'Remote'),
-            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'Hybrid'),
-            COUNT(*) FILTER (WHERE is_active AND remote_policy = 'On-Site'),
-            AVG(salary_min)  FILTER (WHERE is_active AND salary_min IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
-            AVG(salary_max)  FILTER (WHERE is_active AND salary_max IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_min)
-                FILTER (WHERE is_active AND salary_min IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly'),
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary_max)
-                FILTER (WHERE is_active AND salary_max IS NOT NULL AND salary_currency = 'USD' AND salary_period = 'yearly')
-        FROM jobs
-        GROUP BY company_id
+            COUNT(*) FILTER (WHERE j.is_active),
+            COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days'),
+            COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days'),
+            -- closed_7d: only meaningful when we have history > 7 days old
+            CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
+                 THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
+            END,
+            -- closed_30d: only meaningful when we have history > 30 days old
+            CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
+                 THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
+            END,
+            -- net_change_7d
+            CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
+                 THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days')
+                    - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
+            END,
+            -- net_change_30d
+            CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
+                 THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days')
+                    - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
+            END,
+            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Remote'),
+            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Hybrid'),
+            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'On-Site'),
+            AVG(j.salary_min)  FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+            AVG(j.salary_max)  FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_min)
+                FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
+                FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
+        FROM jobs j
+        LEFT JOIN first_run fr ON fr.company_id = j.company_id
+        GROUP BY j.company_id, fr.first_run_date
         ON CONFLICT (company_id, snapshot_date) DO UPDATE SET
             active_jobs       = EXCLUDED.active_jobs,
             posted_7d         = EXCLUDED.posted_7d,
@@ -358,7 +383,7 @@ def refresh_company_analytics(conn, cur) -> dict:
             median_salary_min = EXCLUDED.median_salary_min,
             median_salary_max = EXCLUDED.median_salary_max;
         """,
-        (today,) + (today,) * 8,
+        (today,) + (today,) * 12,
     )
     stats_rows = cur.rowcount
 
@@ -381,7 +406,7 @@ def refresh_company_analytics(conn, cur) -> dict:
             COUNT(*),
             ROUND(100.0 * COUNT(*) / ac.total, 2)
         FROM jobs j,
-             LATERAL unnest(j.skills) AS s(skill),
+             LATERAL (SELECT DISTINCT unnest(j.skills)) AS s(skill),
              (SELECT company_id, COUNT(*) AS total
               FROM jobs WHERE is_active GROUP BY company_id) ac
         WHERE j.is_active
@@ -931,6 +956,10 @@ def purge_processed_staging(conn, cur) -> int:
 def insert_staging_jobs(conn, cur, data: dict) -> int:
     """Insert jobs from a scraped JSON payload into the staging_jobs table.
 
+    Deletes any existing unprocessed rows for this company before inserting,
+    making the task fully idempotent — a retry always loads fresh S3 data
+    without leaving duplicate unprocessed rows behind from a prior attempt.
+
     Args:
         conn: psycopg2 connection
         cur: psycopg2 cursor
@@ -954,6 +983,15 @@ def insert_staging_jobs(conn, cur, data: dict) -> int:
 
     company_id = company_row["company_id"]
     scraper_type = company_row["scraper_type"]
+
+    cur.execute(
+        "DELETE FROM staging_jobs WHERE company_id = %s AND processed = FALSE",
+        (company_id,),
+    )
+    if cur.rowcount:
+        logger.info(
+            f"Cleared {cur.rowcount} stale unprocessed staging rows for {company_name}"
+        )
 
     if not jobs:
         conn.commit()

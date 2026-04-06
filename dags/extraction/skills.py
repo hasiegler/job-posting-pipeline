@@ -88,7 +88,7 @@ def build_skill_matchers(cur) -> list[SkillMatcher]:
 
 
 def extract_skills(text: str, matchers: list[SkillMatcher]) -> list[str]:
-    """Return canonical skill names detected in text."""
+    """Return canonical skill names detected in text, each at most once."""
     if not text or not matchers:
         return []
 
@@ -96,9 +96,13 @@ def extract_skills(text: str, matchers: list[SkillMatcher]) -> list[str]:
     if not cleaned:
         return []
 
-    matches = []
+    seen: set[str] = set()
+    matches: list[str] = []
     for matcher in matchers:
-        if any(pattern.search(cleaned) for pattern in matcher.patterns):
+        if matcher.skill_name not in seen and any(
+            pattern.search(cleaned) for pattern in matcher.patterns
+        ):
+            seen.add(matcher.skill_name)
             matches.append(matcher.skill_name)
 
     return matches

@@ -88,17 +88,42 @@ def sync_companies(path: str = COMPANIES_FILE) -> dict:
             WHERE company_name = %s
         """, to_update)
 
+    # Companies in DB but removed from YAML — disable them rather than leaving
+    # them enabled, which would cause stale scraping.
     orphaned = set(existing.keys()) - yaml_names
-    for name in orphaned:
-        print(f"  WARNING: '{name}' exists in DB but not in companies.yaml")
+    to_disable = [
+        name for name in orphaned
+        if existing[name]["enabled"]
+    ]
+    if to_disable:
+        execute_batch(cur, """
+            UPDATE companies
+            SET enabled = FALSE, updated_at = NOW()
+            WHERE company_name = %s
+        """, [(name,) for name in to_disable])
+        for name in to_disable:
+            print(f"  Disabled (removed from YAML): {name}")
+
+    already_disabled = orphaned - set(to_disable)
+    for name in already_disabled:
+        print(f"  Already disabled (not in YAML): {name}")
 
     conn.commit()
     close_conn_cursor(conn, cur)
 
     inserted = len(to_insert)
     updated = len(to_update)
-    summary = {"inserted": inserted, "updated": updated, "warnings": len(orphaned)}
-    print(f"\nSync complete: {inserted} inserted, {updated} updated, {len(orphaned)} warnings")
+    disabled = len(to_disable)
+    summary = {
+        "inserted": inserted,
+        "updated": updated,
+        "disabled": disabled,
+        "warnings": len(already_disabled),
+    }
+    print(
+        f"\nSync complete: {inserted} inserted, {updated} updated, "
+        f"{disabled} disabled, {len(already_disabled)} already-disabled orphans"
+    )
     return summary
 
 

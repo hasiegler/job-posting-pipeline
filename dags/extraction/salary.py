@@ -57,10 +57,24 @@ _YEARLY_RE = re.compile(
 
 
 def _parse_amount(raw: str, has_k: bool) -> float:
-    """Parse a salary amount, handling both US (1,000) and EU (1.000) formats."""
+    """Parse a salary amount, handling both US (1,000) and EU (1.000) formats.
+
+    Handled patterns:
+        EU no decimal  : "179.600"     → 179600.0
+        EU with decimal: "179.600.00"  → 179600.0
+        US no decimal  : "93,200"      → 93200.0
+        US with decimal: "1,234.56"    → 1234.56
+        Plain          : "100"         → 100.0
+    """
     if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
+        # Pure EU thousands, e.g. "179.600"
         value = float(raw.replace(".", ""))
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+\.\d{1,2}", raw):
+        # EU thousands + decimal fraction, e.g. "179.600.00"
+        integer_part, decimal_part = raw.rsplit(".", 1)
+        value = float(f"{integer_part.replace('.', '')}.{decimal_part}")
     else:
+        # US format or plain integer, e.g. "93,200" or "1,234.56"
         value = float(raw.replace(",", ""))
     if has_k:
         value *= 1000
