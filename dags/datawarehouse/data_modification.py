@@ -5,7 +5,6 @@ Helper functions for inserting/modifying data in Supabase tables.
 import json
 import logging
 from datetime import datetime
-from urllib.parse import urlparse, urlunparse
 
 from psycopg2.extras import execute_values, Json
 
@@ -465,14 +464,6 @@ def refresh_company_analytics(conn, cur) -> dict:
     return summary
 
 
-def clean_url(url: str) -> str:
-    """Strip query parameters and fragments from a URL."""
-    if not url:
-        return url
-    parsed = urlparse(url)
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
-
-
 def _parse_timestamp(value) -> datetime | None:
     if not value:
         return None
@@ -485,7 +476,7 @@ def normalize_greenhouse(raw_data: dict) -> dict:
     """Normalize a Greenhouse raw_data JSONB object to the jobs table schema."""
     return {
         "source_job_id": str(raw_data.get("id", "")),
-        "source_url": clean_url(raw_data.get("url")),
+        "source_url": raw_data.get("url"),
         "title": raw_data.get("title"),
         "location": raw_data.get("location"),
         "departments": raw_data.get("departments", []),

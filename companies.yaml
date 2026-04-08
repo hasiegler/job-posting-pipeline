@@ -204,3 +204,48 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/roblox
     enabled: true
+
+  - name: spacex_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/spacex
+    enabled: true
+
+  - name: anduril_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/andurilindustries
+    enabled: true
+
+  - name: flexport_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/flexport
+    enabled: true
+
+  - name: webflow_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/webflow
+    enabled: true
+
+  - name: lattice_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/lattice
+    enabled: true
+
+  - name: samsara_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/samsara
+    enabled: true
+
+  - name: chime_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/chime
+    enabled: true
+
+  - name: relativity_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/relativity
+    enabled: true
+
+  - name: zipline_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/flyzipline
+    enabled: true
