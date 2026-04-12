@@ -304,7 +304,7 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
     conn.commit()
 
 
-def refresh_company_analytics(conn, cur) -> dict:
+def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict:
     """Snapshot company-level analytics from the current state of the jobs table.
 
     closed_* and net_change_* are only populated when the pipeline has at least
@@ -312,156 +312,182 @@ def refresh_company_analytics(conn, cur) -> dict:
     that history exists, those counts would be artificially low (we wouldn't
     know what closed because we had no prior baseline), so they are left NULL.
     """
+    cur.execute("SHOW statement_timeout")
+    original_timeout = cur.fetchone()[0]
+    cur.execute("SET statement_timeout = %s", (f"{statement_timeout_s}s",))
+
     today = datetime.now().date()
 
-    cur.execute(
-        """
-        WITH first_run AS (
-            -- Earliest run recorded per company across all DAG runs
-            SELECT company_id, MIN(run_started_at)::DATE AS first_run_date
-            FROM company_run_metrics
-            GROUP BY company_id
+    try:
+        cur.execute(
+            """
+            WITH first_run AS (
+                SELECT company_id, MIN(run_started_at)::DATE AS first_run_date
+                FROM company_run_metrics
+                GROUP BY company_id
+            )
+            INSERT INTO company_stats (
+                company_id, snapshot_date, active_jobs,
+                posted_7d, posted_30d, closed_7d, closed_30d,
+                net_change_7d, net_change_30d,
+                remote_count, hybrid_count, onsite_count,
+                avg_salary_min, avg_salary_max,
+                median_salary_min, median_salary_max
+            )
+            SELECT
+                j.company_id,
+                %s,
+                COUNT(*) FILTER (WHERE j.is_active),
+                COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days'),
+                COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days'),
+                CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
+                     THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
+                END,
+                CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
+                     THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
+                END,
+                CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
+                     THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days')
+                        - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
+                END,
+                CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
+                     THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days')
+                        - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
+                END,
+                COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Remote'),
+                COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Hybrid'),
+                COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'On-Site'),
+                AVG(j.salary_min)  FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                AVG(j.salary_max)  FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_min)
+                    FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
+                    FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
+            FROM jobs j
+            LEFT JOIN first_run fr ON fr.company_id = j.company_id
+            GROUP BY j.company_id, fr.first_run_date
+            ON CONFLICT (company_id, snapshot_date) DO UPDATE SET
+                active_jobs       = EXCLUDED.active_jobs,
+                posted_7d         = EXCLUDED.posted_7d,
+                posted_30d        = EXCLUDED.posted_30d,
+                closed_7d         = EXCLUDED.closed_7d,
+                closed_30d        = EXCLUDED.closed_30d,
+                net_change_7d     = EXCLUDED.net_change_7d,
+                net_change_30d    = EXCLUDED.net_change_30d,
+                remote_count      = EXCLUDED.remote_count,
+                hybrid_count      = EXCLUDED.hybrid_count,
+                onsite_count      = EXCLUDED.onsite_count,
+                avg_salary_min    = EXCLUDED.avg_salary_min,
+                avg_salary_max    = EXCLUDED.avg_salary_max,
+                median_salary_min = EXCLUDED.median_salary_min,
+                median_salary_max = EXCLUDED.median_salary_max;
+            """,
+            (today,) + (today,) * 12,
         )
-        INSERT INTO company_stats (
-            company_id, snapshot_date, active_jobs,
-            posted_7d, posted_30d, closed_7d, closed_30d,
-            net_change_7d, net_change_30d,
-            remote_count, hybrid_count, onsite_count,
-            avg_salary_min, avg_salary_max,
-            median_salary_min, median_salary_max
-        )
-        SELECT
-            j.company_id,
-            %s,
-            COUNT(*) FILTER (WHERE j.is_active),
-            COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days'),
-            COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days'),
-            -- closed_7d: only meaningful when we have history > 7 days old
-            CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
-                 THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
-            END,
-            -- closed_30d: only meaningful when we have history > 30 days old
-            CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
-                 THEN COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
-            END,
-            -- net_change_7d
-            CASE WHEN fr.first_run_date <= %s - INTERVAL '7 days'
-                 THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '7 days')
-                    - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '7 days')
-            END,
-            -- net_change_30d
-            CASE WHEN fr.first_run_date <= %s - INTERVAL '30 days'
-                 THEN COUNT(*) FILTER (WHERE j.first_published_at >= %s - INTERVAL '30 days')
-                    - COUNT(*) FILTER (WHERE j.date_closed >= %s - INTERVAL '30 days')
-            END,
-            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Remote'),
-            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'Hybrid'),
-            COUNT(*) FILTER (WHERE j.is_active AND j.remote_policy = 'On-Site'),
-            AVG(j.salary_min)  FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
-            AVG(j.salary_max)  FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_min)
-                FILTER (WHERE j.is_active AND j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
-                FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
-        FROM jobs j
-        LEFT JOIN first_run fr ON fr.company_id = j.company_id
-        GROUP BY j.company_id, fr.first_run_date
-        ON CONFLICT (company_id, snapshot_date) DO UPDATE SET
-            active_jobs       = EXCLUDED.active_jobs,
-            posted_7d         = EXCLUDED.posted_7d,
-            posted_30d        = EXCLUDED.posted_30d,
-            closed_7d         = EXCLUDED.closed_7d,
-            closed_30d        = EXCLUDED.closed_30d,
-            net_change_7d     = EXCLUDED.net_change_7d,
-            net_change_30d    = EXCLUDED.net_change_30d,
-            remote_count      = EXCLUDED.remote_count,
-            hybrid_count      = EXCLUDED.hybrid_count,
-            onsite_count      = EXCLUDED.onsite_count,
-            avg_salary_min    = EXCLUDED.avg_salary_min,
-            avg_salary_max    = EXCLUDED.avg_salary_max,
-            median_salary_min = EXCLUDED.median_salary_min,
-            median_salary_max = EXCLUDED.median_salary_max;
-        """,
-        (today,) + (today,) * 12,
-    )
-    stats_rows = cur.rowcount
+        stats_rows = cur.rowcount
 
-    cur.execute(
-        """
-        DELETE FROM company_skills
-        WHERE snapshot_date = %s;
-        """,
-        (today,),
-    )
-    cur.execute(
-        """
-        INSERT INTO company_skills (
-            company_id, snapshot_date, skill_name, mention_count, percentage
+        cur.execute(
+            """
+            DELETE FROM company_skills
+            WHERE snapshot_date = %s;
+            """,
+            (today,),
         )
-        SELECT
-            j.company_id,
-            %s,
-            s.skill,
-            COUNT(*),
-            ROUND(100.0 * COUNT(*) / ac.total, 2)
-        FROM jobs j,
-             LATERAL (SELECT DISTINCT unnest(j.skills)) AS s(skill),
-             (SELECT company_id, COUNT(*) AS total
-              FROM jobs WHERE is_active GROUP BY company_id) ac
-        WHERE j.is_active
-          AND j.company_id = ac.company_id
-        GROUP BY j.company_id, s.skill, ac.total
-        ON CONFLICT (company_id, snapshot_date, skill_name) DO UPDATE SET
-            mention_count = EXCLUDED.mention_count,
-            percentage    = EXCLUDED.percentage;
-        """,
-        (today,),
-    )
-    skills_rows = cur.rowcount
-
-    cur.execute(
-        """
-        DELETE FROM company_departments
-        WHERE snapshot_date = %s;
-        """,
-        (today,),
-    )
-    cur.execute(
-        """
-        INSERT INTO company_departments (
-            company_id, snapshot_date, department_name,
-            active_job_count, percentage
+        cur.execute(
+            """
+            INSERT INTO company_skills (
+                company_id, snapshot_date, skill_name, mention_count, percentage,
+                avg_salary_min, avg_salary_max,
+                median_salary_min, median_salary_max
+            )
+            SELECT
+                j.company_id,
+                %s,
+                s.skill,
+                COUNT(*),
+                ROUND(100.0 * COUNT(*) / ac.total, 2),
+                AVG(j.salary_min)  FILTER (WHERE j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                AVG(j.salary_max)  FILTER (WHERE j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_min)
+                    FILTER (WHERE j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
+                    FILTER (WHERE j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
+            FROM jobs j,
+                 LATERAL (SELECT DISTINCT unnest(j.skills)) AS s(skill),
+                 (SELECT company_id, COUNT(*) AS total
+                  FROM jobs WHERE is_active GROUP BY company_id) ac
+            WHERE j.is_active
+              AND j.company_id = ac.company_id
+            GROUP BY j.company_id, s.skill, ac.total
+            ON CONFLICT (company_id, snapshot_date, skill_name) DO UPDATE SET
+                mention_count     = EXCLUDED.mention_count,
+                percentage        = EXCLUDED.percentage,
+                avg_salary_min    = EXCLUDED.avg_salary_min,
+                avg_salary_max    = EXCLUDED.avg_salary_max,
+                median_salary_min = EXCLUDED.median_salary_min,
+                median_salary_max = EXCLUDED.median_salary_max;
+            """,
+            (today,),
         )
-        SELECT
-            j.company_id,
-            %s,
-            d.dept,
-            COUNT(*),
-            ROUND(100.0 * COUNT(*) / ac.total, 2)
-        FROM jobs j,
-             LATERAL unnest(j.departments) AS d(dept),
-             (SELECT company_id, COUNT(*) AS total
-              FROM jobs WHERE is_active GROUP BY company_id) ac
-        WHERE j.is_active
-          AND j.company_id = ac.company_id
-        GROUP BY j.company_id, d.dept, ac.total
-        ON CONFLICT (company_id, snapshot_date, department_name) DO UPDATE SET
-            active_job_count = EXCLUDED.active_job_count,
-            percentage       = EXCLUDED.percentage;
-        """,
-        (today,),
-    )
-    departments_rows = cur.rowcount
+        skills_rows = cur.rowcount
 
-    conn.commit()
-    summary = {
-        "snapshot_date": str(today),
-        "stats_rows": stats_rows,
-        "skills_rows": skills_rows,
-        "departments_rows": departments_rows,
-    }
-    logger.info(f"Company analytics refreshed: {summary}")
-    return summary
+        cur.execute(
+            """
+            DELETE FROM company_departments
+            WHERE snapshot_date = %s;
+            """,
+            (today,),
+        )
+        cur.execute(
+            """
+            INSERT INTO company_departments (
+                company_id, snapshot_date, department_name,
+                active_job_count, percentage,
+                avg_salary_min, avg_salary_max,
+                median_salary_min, median_salary_max
+            )
+            SELECT
+                j.company_id,
+                %s,
+                d.dept,
+                COUNT(*),
+                ROUND(100.0 * COUNT(*) / ac.total, 2),
+                AVG(j.salary_min)  FILTER (WHERE j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                AVG(j.salary_max)  FILTER (WHERE j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_min)
+                    FILTER (WHERE j.salary_min IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly'),
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
+                    FILTER (WHERE j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
+            FROM jobs j,
+                 LATERAL unnest(j.departments) AS d(dept),
+                 (SELECT company_id, COUNT(*) AS total
+                  FROM jobs WHERE is_active GROUP BY company_id) ac
+            WHERE j.is_active
+              AND j.company_id = ac.company_id
+            GROUP BY j.company_id, d.dept, ac.total
+            ON CONFLICT (company_id, snapshot_date, department_name) DO UPDATE SET
+                active_job_count  = EXCLUDED.active_job_count,
+                percentage        = EXCLUDED.percentage,
+                avg_salary_min    = EXCLUDED.avg_salary_min,
+                avg_salary_max    = EXCLUDED.avg_salary_max,
+                median_salary_min = EXCLUDED.median_salary_min,
+                median_salary_max = EXCLUDED.median_salary_max;
+            """,
+            (today,),
+        )
+        departments_rows = cur.rowcount
+
+        conn.commit()
+        summary = {
+            "snapshot_date": str(today),
+            "stats_rows": stats_rows,
+            "skills_rows": skills_rows,
+            "departments_rows": departments_rows,
+        }
+        logger.info(f"Company analytics refreshed: {summary}")
+        return summary
+    finally:
+        cur.execute("SET statement_timeout = %s", (original_timeout,))
 
 
 def _parse_timestamp(value) -> datetime | None:

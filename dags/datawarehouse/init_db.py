@@ -150,11 +150,15 @@ def create_company_analytics_tables():
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS company_skills (
-            company_id    INTEGER NOT NULL REFERENCES companies(company_id),
-            snapshot_date DATE    NOT NULL,
-            skill_name    TEXT    NOT NULL,
-            mention_count INTEGER NOT NULL DEFAULT 0,
-            percentage    NUMERIC NOT NULL DEFAULT 0,
+            company_id        INTEGER NOT NULL REFERENCES companies(company_id),
+            snapshot_date     DATE    NOT NULL,
+            skill_name        TEXT    NOT NULL,
+            mention_count     INTEGER NOT NULL DEFAULT 0,
+            percentage        NUMERIC NOT NULL DEFAULT 0,
+            avg_salary_min    NUMERIC,
+            avg_salary_max    NUMERIC,
+            median_salary_min NUMERIC,
+            median_salary_max NUMERIC,
             PRIMARY KEY (company_id, snapshot_date, skill_name)
         );
     """)
@@ -165,11 +169,15 @@ def create_company_analytics_tables():
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS company_departments (
-            company_id       INTEGER NOT NULL REFERENCES companies(company_id),
-            snapshot_date    DATE    NOT NULL,
-            department_name  TEXT    NOT NULL,
-            active_job_count INTEGER NOT NULL DEFAULT 0,
-            percentage       NUMERIC NOT NULL DEFAULT 0,
+            company_id        INTEGER NOT NULL REFERENCES companies(company_id),
+            snapshot_date     DATE    NOT NULL,
+            department_name   TEXT    NOT NULL,
+            active_job_count  INTEGER NOT NULL DEFAULT 0,
+            percentage        NUMERIC NOT NULL DEFAULT 0,
+            avg_salary_min    NUMERIC,
+            avg_salary_max    NUMERIC,
+            median_salary_min NUMERIC,
+            median_salary_max NUMERIC,
             PRIMARY KEY (company_id, snapshot_date, department_name)
         );
     """)
