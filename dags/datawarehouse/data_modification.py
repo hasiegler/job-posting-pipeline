@@ -313,7 +313,7 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
     know what closed because we had no prior baseline), so they are left NULL.
     """
     cur.execute("SHOW statement_timeout")
-    original_timeout = cur.fetchone()[0]
+    original_timeout = cur.fetchone()["statement_timeout"]
     cur.execute("SET statement_timeout = %s", (f"{statement_timeout_s}s",))
 
     today = datetime.now().date()
