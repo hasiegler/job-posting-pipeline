@@ -249,3 +249,133 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/flyzipline
     enabled: true
+
+  - name: thumbtack_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/thumbtack
+    enabled: true
+
+  - name: newrelic_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/newrelic
+    enabled: true
+
+  - name: postman_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/postman
+    enabled: true
+
+  - name: verkada_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/verkada
+    enabled: true
+
+  - name: labelbox_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/labelbox
+    enabled: true
+
+  - name: figment_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/figment
+    enabled: true
+
+  - name: amplitude_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/amplitude
+    enabled: true
+
+  - name: launchdarkly_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/launchdarkly
+    enabled: true
+
+  - name: netlify_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/netlify
+    enabled: true
+
+  - name: circleci_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/circleci
+    enabled: true
+
+  - name: yugabyte_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/yugabyte
+    enabled: true
+
+  - name: fivetran_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/fivetran
+    enabled: true
+
+  - name: assemblyai_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/assemblyai
+    enabled: true
+
+  - name: coreweave_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/coreweave
+    enabled: true
+
+  - name: doximity_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/doximity
+    enabled: true
+
+  - name: sofi_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/sofi
+    enabled: true
+
+  - name: marqeta_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/marqeta
+    enabled: true
+
+  - name: toast_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/toast
+    enabled: true
+
+  - name: gemini_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/gemini
+    enabled: true
+
+  - name: carta_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/carta
+    enabled: true
+
+  - name: faire_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/faire
+    enabled: true
+
+  - name: remotecom_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/remotecom
+    enabled: true
+
+  - name: scopely_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/scopely
+    enabled: true
+
+  - name: wolt_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/wolt
+    enabled: true
+
+  - name: trivago_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/trivago
+    enabled: true
+
+  - name: nubank_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/nubank
+    enabled: true
