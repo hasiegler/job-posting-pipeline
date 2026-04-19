@@ -7,3 +7,5 @@ output/
 logs/
 
 .env
+
+analysis/results/

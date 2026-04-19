@@ -11,9 +11,32 @@ from psycopg2.extras import execute_values, Json
 from extraction import EXTRACTION_VERSION
 from extraction.salary import extract_salary
 from extraction.remote_policy import extract_remote_policy
-from extraction.skills import build_skill_matchers, extract_skills
+from extraction.skills import (
+    build_company_skill_exclusions,
+    build_skill_matchers,
+    extract_skills,
+)
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Boilerplate skill suppression for the company_skills snapshot.
+#
+# A skill mentioned in (almost) every active posting at a single company is
+# almost certainly sitting in the "About <Company>" boilerplate that gets
+# pasted into every JD, not a real per-role requirement.  Examples we observed
+# at the 2026-04-18 snapshot:
+#   - MLflow / Apache / Spark @ Databricks (851/851 = 100%)
+#   - AWS / Azure @ MongoDB (413/418 = 98.80%)
+#   - Elasticsearch @ Elastic (204/204 = 100%)
+#
+# These rows are dropped from `company_skills` only — `jobs.skills` is kept as
+# the raw source of truth in case we want to revisit the rule.  Adjust the two
+# constants below to widen/tighten the cut.
+# ---------------------------------------------------------------------------
+BOILERPLATE_SKILL_MIN_MENTIONS = 20        # ignore tiny-N companies
+BOILERPLATE_SKILL_MIN_PERCENTAGE = 90.0    # mentioned in ≥X% of active jobs
 
 
 def _empty_company_metrics() -> dict:
@@ -419,6 +442,14 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
             WHERE j.is_active
               AND j.company_id = ac.company_id
             GROUP BY j.company_id, s.skill, ac.total
+            -- Drop boilerplate-shaped rows: a skill that fires on (almost)
+            -- every active posting at a company is almost always sitting in
+            -- the "About <Company>" intro, not a real per-role requirement.
+            -- Raw `jobs.skills` is left untouched.
+            HAVING NOT (
+                COUNT(*) > %s
+                AND 100.0 * COUNT(*) / ac.total >= %s
+            )
             ON CONFLICT (company_id, snapshot_date, skill_name) DO UPDATE SET
                 mention_count     = EXCLUDED.mention_count,
                 percentage        = EXCLUDED.percentage,
@@ -427,7 +458,7 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
                 median_salary_min = EXCLUDED.median_salary_min,
                 median_salary_max = EXCLUDED.median_salary_max;
             """,
-            (today,),
+            (today, BOILERPLATE_SKILL_MIN_MENTIONS, BOILERPLATE_SKILL_MIN_PERCENTAGE),
         )
         skills_rows = cur.rowcount
 
@@ -836,6 +867,7 @@ def extract_fields_from_jobs(conn, cur) -> dict:
     temp table rather than one UPDATE per row.
     """
     skill_matchers = build_skill_matchers(cur)
+    skill_exclusions = build_company_skill_exclusions(cur)
 
     cur.execute("""
         SELECT job_id, company_id, title, description_text, location
@@ -878,6 +910,9 @@ def extract_fields_from_jobs(conn, cur) -> dict:
         skills = extract_skills(
             " ".join(part for part in [title, desc] if part), skill_matchers
         )
+        excluded = skill_exclusions.get(company_id)
+        if excluded and skills:
+            skills = [s for s in skills if s not in excluded]
 
         s_min = s_max = s_curr = s_period = None
         if salary:

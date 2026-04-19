@@ -106,3 +106,74 @@ def extract_skills(text: str, matchers: list[SkillMatcher]) -> list[str]:
             matches.append(matcher.skill_name)
 
     return matches
+
+
+# ---------------------------------------------------------------------------
+# Self-vendor exclusions
+# ---------------------------------------------------------------------------
+# Some companies in our scrape list are also entries in the skills taxonomy
+# (e.g. Cloudflare, Datadog, MongoDB, GitLab).  The regex matcher fires on the
+# company's own job descriptions ("Join Cloudflare to build...") and inflates
+# that skill's count at that company.  We filter those matches out per-job by
+# comparing the job's company canonical name against the skill name + aliases
+# (case- and punctuation-insensitive).  Exclusion is per-company, not global:
+# `Databricks` should still be a valid skill at SpaceX.
+
+def _normalize_company_token(value: str) -> str:
+    """Lowercase + strip everything that isn't [a-z0-9] for vendor matching."""
+    return "".join(ch for ch in (value or "").lower() if ch.isalnum())
+
+
+def build_company_skill_exclusions(cur) -> dict[int, set[str]]:
+    """Map company_id -> set of skill_name strings to drop from that company's jobs.
+
+    A skill is excluded for a company when the company's normalized canonical
+    identifier matches the normalized form of the skill_name OR any alias.
+    Returns only companies that have at least one excluded skill, so callers
+    can cheaply check `exclusions.get(company_id)`.
+    """
+    cur.execute(
+        "SELECT skill_name, aliases FROM skills WHERE is_active = TRUE"
+    )
+    skill_tokens: list[tuple[str, set[str]]] = []
+    for row in cur.fetchall():
+        tokens = {_normalize_company_token(row["skill_name"])}
+        for alias in (row.get("aliases") or []):
+            tokens.add(_normalize_company_token(str(alias)))
+        tokens.discard("")
+        if tokens:
+            skill_tokens.append((row["skill_name"], tokens))
+
+    cur.execute(
+        """
+        SELECT company_id,
+               scraper_type,
+               COALESCE(canonical_name, company_name) AS canonical_name
+        FROM companies
+        """
+    )
+    exclusions: dict[int, set[str]] = {}
+    for row in cur.fetchall():
+        canonical = row["canonical_name"] or ""
+        suffix = f"_{row['scraper_type'] or ''}"
+        if len(suffix) > 1 and canonical.endswith(suffix):
+            canonical = canonical[: -len(suffix)]
+        company_token = _normalize_company_token(canonical)
+        if not company_token:
+            continue
+        excluded = {
+            skill_name
+            for skill_name, tokens in skill_tokens
+            if company_token in tokens
+        }
+        if excluded:
+            exclusions[row["company_id"]] = excluded
+
+    if exclusions:
+        logger.info(
+            "Built self-vendor skill exclusions for %d companies "
+            "(e.g. %s).",
+            len(exclusions),
+            next(iter(exclusions.values())),
+        )
+    return exclusions
