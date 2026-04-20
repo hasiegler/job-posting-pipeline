@@ -379,3 +379,153 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/nubank
     enabled: true
+
+  - name: clickhouse_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/clickhouse
+    enabled: true
+
+  - name: checkr_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/checkr
+    enabled: true
+
+  - name: mercury_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/mercury
+    enabled: true
+
+  - name: block_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/block
+    enabled: true
+
+  - name: betterment_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/betterment
+    enabled: true
+
+  - name: clever_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/clever
+    enabled: true
+
+  - name: klaviyo_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/klaviyo
+    enabled: true
+
+  - name: chainguard_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/chainguard
+    enabled: true
+
+  - name: temporaltechnologies_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/temporaltechnologies
+    enabled: true
+
+  - name: oscar_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/oscar
+    enabled: true
+
+  - name: peloton_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/peloton
+    enabled: true
+
+  - name: classpass_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/classpass
+    enabled: true
+
+  - name: nuro_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/nuro
+    enabled: true
+
+  - name: flexe_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/flexe
+    enabled: true
+
+  - name: opendoor_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/opendoor
+    enabled: true
+
+  - name: urbancompass_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/urbancompass
+    enabled: true
+
+  - name: godaddy_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/godaddy
+    enabled: true
+
+  - name: pagaya_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/pagaya
+    enabled: true
+
+  - name: imply_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/imply
+    enabled: true
+
+  - name: grafanalabs_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/grafanalabs
+    enabled: true
+
+  - name: tebra_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/tebra
+    enabled: true
+
+  - name: growtherapy_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/growtherapy
+    enabled: true
+
+  - name: stockx_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/stockx
+    enabled: true
+
+  - name: glossier_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/glossier
+    enabled: true
+
+  - name: zocdoc_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/zocdoc
+    enabled: true
+
+  - name: angi_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/angi
+    enabled: true
+
+  - name: sweetgreen_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/sweetgreen
+    enabled: true
+
+  - name: allbirds_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/allbirds
+    enabled: true
+
+  - name: getyourguide_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/getyourguide
+    enabled: true
+
+  - name: intercom_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/intercom
+    enabled: true

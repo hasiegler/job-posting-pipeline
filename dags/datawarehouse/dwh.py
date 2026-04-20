@@ -15,7 +15,11 @@ except ImportError:
     def get_current_context():
         return {}
 
-from datawarehouse.data_utils import get_conn_cursor, close_conn_cursor
+from datawarehouse.data_utils import (
+    get_conn_cursor,
+    close_conn_cursor,
+    run_with_db,
+)
 from datawarehouse.data_loading import load_s3_json
 from datawarehouse.data_modification import (
     insert_staging_jobs,
@@ -33,9 +37,7 @@ def update_staging_jobs(s3_path: str) -> dict:
     """Load a JSON file from S3 and insert its jobs into the staging_jobs table."""
     data = load_s3_json(s3_path)
 
-    conn, cur = get_conn_cursor()
-    inserted = insert_staging_jobs(conn, cur, data)
-    close_conn_cursor(conn, cur)
+    inserted = run_with_db(lambda conn, cur: insert_staging_jobs(conn, cur, data))
 
     company = data["company"]
     scraped_jobs = int(data.get("total_jobs", inserted))
@@ -46,10 +48,7 @@ def update_staging_jobs(s3_path: str) -> dict:
 @task
 def update_jobs_table() -> dict:
     """Process all unprocessed staging_jobs rows into the jobs table."""
-    conn, cur = get_conn_cursor()
-    summary = process_staging_to_jobs(conn, cur)
-    close_conn_cursor(conn, cur)
-
+    summary = run_with_db(process_staging_to_jobs)
     print(f"  Jobs table updated: {summary}")
     return summary
 
@@ -62,10 +61,9 @@ def snapshot_job_changes(jobs_summary: dict) -> dict:
         print("  No job changes to snapshot.")
         return {"snapshots_written": 0}
 
-    conn, cur = get_conn_cursor()
-    summary = snapshot_changed_jobs(conn, cur, changed_jobs)
-    close_conn_cursor(conn, cur)
-
+    summary = run_with_db(
+        lambda conn, cur: snapshot_changed_jobs(conn, cur, changed_jobs)
+    )
     print(f"  Job history snapshots: {summary}")
     return summary
 
@@ -73,10 +71,7 @@ def snapshot_job_changes(jobs_summary: dict) -> dict:
 @task
 def extract_fields() -> dict:
     """Extract structured fields (salary, etc.) from unprocessed job descriptions."""
-    conn, cur = get_conn_cursor()
-    summary = extract_fields_from_jobs(conn, cur)
-    close_conn_cursor(conn, cur)
-
+    summary = run_with_db(extract_fields_from_jobs)
     print(f"  Fields extracted: {summary}")
     return summary
 
@@ -84,10 +79,7 @@ def extract_fields() -> dict:
 @task
 def clean_staging() -> dict:
     """Delete processed rows from staging_jobs."""
-    conn, cur = get_conn_cursor()
-    deleted = purge_processed_staging(conn, cur)
-    close_conn_cursor(conn, cur)
-
+    deleted = run_with_db(purge_processed_staging)
     print(f"  Purged {deleted} processed staging rows")
     return {"deleted": deleted}
 
@@ -95,10 +87,7 @@ def clean_staging() -> dict:
 @task
 def refresh_analytics() -> dict:
     """Snapshot precomputed company analytics from the current jobs table."""
-    conn, cur = get_conn_cursor()
-    summary = refresh_company_analytics(conn, cur)
-    close_conn_cursor(conn, cur)
-
+    summary = run_with_db(refresh_company_analytics)
     print(f"  Company analytics refreshed: {summary}")
     return summary
 

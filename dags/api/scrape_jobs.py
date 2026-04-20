@@ -57,11 +57,24 @@ def scrape_greenhouse(company: dict) -> dict:
     api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
 
     print(f"  Fetching job list from {api_url} ...")
-    resp = requests.get(api_url, params={"content": "true"}, timeout=30)
+    resp = requests.get(api_url, params={"content": "true"}, timeout=60)
     resp.raise_for_status()
 
-    raw_jobs = resp.json().get("jobs", [])
-    print(f"  Found {len(raw_jobs)} jobs.")
+    body = resp.json()
+    raw_jobs = body.get("jobs", [])
+    # Greenhouse's /jobs endpoint is unpaginated and returns meta.total. If the
+    # response we got has fewer jobs than meta.total, treat it as a partial
+    # response and fail loud — silently accepting it would mass-close the
+    # missing jobs downstream and pollute job_history with phantom
+    # close+reactivate cycles.
+    meta_total = body.get("meta", {}).get("total")
+    if meta_total is not None and meta_total != len(raw_jobs):
+        raise RuntimeError(
+            f"{company['name']}: Greenhouse reported meta.total={meta_total} "
+            f"but returned {len(raw_jobs)} jobs — refusing partial response."
+        )
+
+    print(f"  Found {len(raw_jobs)} jobs (meta.total={meta_total}).")
 
     jobs = []
     for raw in raw_jobs:
@@ -85,7 +98,7 @@ def scrape_greenhouse(company: dict) -> dict:
             }
         )
 
-    return {"company_name": company["name"], "jobs": jobs}
+    return {"company_name": company["name"], "jobs": jobs, "meta_total": meta_total}
 
 
 @task
@@ -105,6 +118,7 @@ def save_results(result: dict) -> str:
         "company": company_name,
         "scraped_at": now.isoformat(),
         "total_jobs": len(jobs),
+        "meta_total": result.get("meta_total"),
         "jobs": jobs,
     }
 

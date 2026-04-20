@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=https://claude.ai/chat/ac8d53fc-d68f-49d2-bca6-28dc154e1e13
+HostUrl=https://claude.ai/api/organizations/f9ffa096-732e-4df0-afe8-60f37851b3fa/conversations/ac8d53fc-d68f-49d2-bca6-28dc154e1e13/wiggle/download-file?path=%2Fmnt%2Fuser-data%2Foutputs%2Fverify_greenhouse_slugs.py
