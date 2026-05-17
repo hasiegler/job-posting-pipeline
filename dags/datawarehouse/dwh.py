@@ -33,8 +33,17 @@ from datawarehouse.data_modification import (
 
 
 @task
-def update_staging_jobs(s3_path: str) -> dict:
-    """Load a JSON file from S3 and insert its jobs into the staging_jobs table."""
+def update_staging_jobs(s3_path: str | None) -> dict | None:
+    """Load a JSON file from S3 and insert its jobs into the staging_jobs table.
+
+    `s3_path` is `None` when the upstream scrape failed and `save_results`
+    returned None — in that case we no-op and return None so the rest of
+    the pipeline keeps moving with the companies that DID succeed.
+    """
+    if s3_path is None:
+        print("  Skipping staging load — upstream scrape was skipped.")
+        return None
+
     data = load_s3_json(s3_path)
 
     inserted = run_with_db(lambda conn, cur: insert_staging_jobs(conn, cur, data))
@@ -111,7 +120,10 @@ def finalize_run_metrics(
     run_started_at = dag_run.start_date if dag_run and dag_run.start_date else datetime.now(timezone.utc)
     run_finished_at = datetime.now(timezone.utc)
 
-    staging_summaries = staging_summaries or []
+    # Skipped mapped task instances (from scrape failures upstream) can show
+    # up as None entries in the list, depending on Airflow's mapped-task
+    # XCom resolution. Filter them out so we don't crash on `.get`.
+    staging_summaries = [s for s in (staging_summaries or []) if s]
     jobs_summary = jobs_summary or {}
     extraction_summary = extraction_summary or {}
     sync_summary = sync_summary or {}

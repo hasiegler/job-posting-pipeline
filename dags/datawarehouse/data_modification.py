@@ -342,6 +342,18 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
     today = datetime.now().date()
 
     try:
+        # Remove today's stats rows for companies that have since been disabled.
+        # company_stats uses upsert (no preceding DELETE), so without this a
+        # disabled company's stale today-row would persist across future runs.
+        cur.execute(
+            """
+            DELETE FROM company_stats
+            WHERE snapshot_date = %s
+              AND company_id IN (SELECT company_id FROM companies WHERE enabled = false);
+            """,
+            (today,),
+        )
+
         cur.execute(
             """
             WITH first_run AS (
@@ -387,6 +399,7 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY j.salary_max)
                     FILTER (WHERE j.is_active AND j.salary_max IS NOT NULL AND j.salary_currency = 'USD' AND j.salary_period = 'yearly')
             FROM jobs j
+            JOIN companies c ON c.company_id = j.company_id AND c.enabled = true
             LEFT JOIN first_run fr ON fr.company_id = j.company_id
             GROUP BY j.company_id, fr.first_run_date
             ON CONFLICT (company_id, snapshot_date) DO UPDATE SET
@@ -441,6 +454,7 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
                   FROM jobs WHERE is_active GROUP BY company_id) ac
             WHERE j.is_active
               AND j.company_id = ac.company_id
+              AND j.company_id IN (SELECT company_id FROM companies WHERE enabled = true)
             GROUP BY j.company_id, s.skill, ac.total
             -- Drop boilerplate-shaped rows: a skill that fires on (almost)
             -- every active posting at a company is almost always sitting in
@@ -495,6 +509,7 @@ def refresh_company_analytics(conn, cur, statement_timeout_s: int = 300) -> dict
                   FROM jobs WHERE is_active GROUP BY company_id) ac
             WHERE j.is_active
               AND j.company_id = ac.company_id
+              AND j.company_id IN (SELECT company_id FROM companies WHERE enabled = true)
             GROUP BY j.company_id, d.dept, ac.total
             ON CONFLICT (company_id, snapshot_date, department_name) DO UPDATE SET
                 active_job_count  = EXCLUDED.active_job_count,
@@ -556,8 +571,43 @@ def normalize_greenhouse(raw_data: dict) -> dict:
     }
 
 
+def normalize_ashby(raw_data: dict) -> dict:
+    """Normalize an Ashby raw_data JSONB object to the jobs table schema.
+
+    Unlike Greenhouse, Ashby provides salary and remote-policy directly on the
+    posting via its API, so those fields are populated here rather than left
+    to the description-text extractors downstream.  `extract_fields_from_jobs`
+    skips `extract_salary`/`extract_remote_policy` for scraper_type='ashby' to
+    avoid overwriting these API-sourced values.
+    """
+    return {
+        "source_job_id": str(raw_data.get("id", "")),
+        "source_url": raw_data.get("url"),
+        "title": raw_data.get("title"),
+        "location": raw_data.get("location"),
+        "departments": raw_data.get("departments", []),
+        "offices": raw_data.get("offices", []),
+        "language": raw_data.get("language"),
+        "description_text": raw_data.get("content_text"),
+        "description_html": raw_data.get("content_html"),
+        "first_published_at": _parse_timestamp(raw_data.get("first_published")),
+        "salary_min": raw_data.get("salary_min"),
+        "salary_max": raw_data.get("salary_max"),
+        "salary_currency": raw_data.get("salary_currency"),
+        "salary_period": raw_data.get("salary_period"),
+        "remote_policy": raw_data.get("remote_policy"),
+        "skills": None,
+        "experience_level": None,
+        "education_required": None,
+        "benefits": None,
+        "extracted_at": None,
+        "extraction_version": None,
+    }
+
+
 NORMALIZERS = {
     "greenhouse": normalize_greenhouse,
+    "ashby": normalize_ashby,
 }
 
 
@@ -641,6 +691,10 @@ def process_staging_to_jobs(conn, cur) -> dict:
     deduped = list(seen_keys.values())
 
     # -- Phase 2: load into temp table ------------------------------------
+    # salary_* and remote_policy travel through _norm so ATSes that expose
+    # those fields on their API (currently only Ashby) can populate them at
+    # this step instead of relying on the description-text extractors.
+    # For Greenhouse the normalizer returns None for all five columns.
     cur.execute("""
         CREATE TEMP TABLE _norm (
             staging_id         INTEGER,
@@ -655,7 +709,12 @@ def process_staging_to_jobs(conn, cur) -> dict:
             language           TEXT,
             description_text   TEXT,
             description_html   TEXT,
-            first_published_at TIMESTAMPTZ
+            first_published_at TIMESTAMPTZ,
+            salary_min         NUMERIC,
+            salary_max         NUMERIC,
+            salary_currency    TEXT,
+            salary_period      TEXT,
+            remote_policy      TEXT
         ) ON COMMIT DROP
     """)
 
@@ -663,7 +722,8 @@ def process_staging_to_jobs(conn, cur) -> dict:
         INSERT INTO _norm (
             staging_id, company_id, scraper_type, source_job_id, source_url,
             title, location, departments, offices, language,
-            description_text, description_html, first_published_at
+            description_text, description_html, first_published_at,
+            salary_min, salary_max, salary_currency, salary_period, remote_policy
         ) VALUES %s
     """, [
         (
@@ -672,11 +732,16 @@ def process_staging_to_jobs(conn, cur) -> dict:
             r["departments"], r["offices"], r["language"],
             r["description_text"], r["description_html"],
             r["first_published_at"],
+            r["salary_min"], r["salary_max"], r["salary_currency"],
+            r["salary_period"], r["remote_policy"],
         )
         for r in deduped
     ])
 
     # -- Phase 3: classify with a single JOIN -----------------------------
+    # NOTE: salary_*/remote_policy are intentionally NOT in `compare_fields`
+    # below — those are API-sourced for some ATSes and extractor-sourced for
+    # others, so churn on those columns shouldn't classify a job as "changed".
     cur.execute("""
         SELECT
             n.staging_id, n.company_id, n.scraper_type, n.source_job_id,
@@ -750,12 +815,16 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 company_id, scraper_type, source_job_id, source_url,
                 title, location, departments, offices, language,
                 description_text, description_html, first_published_at,
+                salary_min, salary_max, salary_currency, salary_period,
+                remote_policy,
                 first_seen, last_seen, is_active
             )
             SELECT
                 n.company_id, n.scraper_type, n.source_job_id, n.source_url,
                 n.title, n.location, n.departments, n.offices, n.language,
                 n.description_text, n.description_html, n.first_published_at,
+                n.salary_min, n.salary_max, n.salary_currency, n.salary_period,
+                n.remote_policy,
                 NOW(), NOW(), TRUE
             FROM _norm n
             WHERE n.staging_id = ANY(%s)
@@ -772,6 +841,9 @@ def process_staging_to_jobs(conn, cur) -> dict:
             })
 
     # -- Phase 5: bulk UPDATE changed / reactivated jobs ------------------
+    # COALESCE on the API-sourced fields keeps Greenhouse jobs' extractor-
+    # populated salary/remote_policy intact (Greenhouse's normalizer returns
+    # None for all five), while Ashby refreshes them from the API on each run.
     if changed_job_ids:
         cur.execute("""
             UPDATE jobs SET
@@ -784,6 +856,11 @@ def process_staging_to_jobs(conn, cur) -> dict:
                 description_text   = n.description_text,
                 description_html   = n.description_html,
                 first_published_at = n.first_published_at,
+                salary_min         = COALESCE(n.salary_min, jobs.salary_min),
+                salary_max         = COALESCE(n.salary_max, jobs.salary_max),
+                salary_currency    = COALESCE(n.salary_currency, jobs.salary_currency),
+                salary_period      = COALESCE(n.salary_period, jobs.salary_period),
+                remote_policy      = COALESCE(n.remote_policy, jobs.remote_policy),
                 is_active          = TRUE,
                 date_closed        = NULL,
                 extracted_at       = NULL,
@@ -870,7 +947,10 @@ def extract_fields_from_jobs(conn, cur) -> dict:
     skill_exclusions = build_company_skill_exclusions(cur)
 
     cur.execute("""
-        SELECT job_id, company_id, title, description_text, location
+        SELECT
+            job_id, company_id, scraper_type,
+            title, description_text, location,
+            salary_min, remote_policy
         FROM jobs
         WHERE extracted_at IS NULL
           AND is_active = TRUE
@@ -898,6 +978,7 @@ def extract_fields_from_jobs(conn, cur) -> dict:
     for row in rows:
         job_id = row["job_id"]
         company_id = row["company_id"]
+        scraper_type = row["scraper_type"]
         title = row["title"]
         desc = row["description_text"]
         loc = row["location"]
@@ -905,8 +986,23 @@ def extract_fields_from_jobs(conn, cur) -> dict:
         company_metrics.setdefault(company_id, _empty_company_metrics())
         company_metrics[company_id]["extraction_attempted"] += 1
 
-        salary = extract_salary(desc)
-        remote_policy = extract_remote_policy(desc, loc)
+        # Ashby exposes salary and workplaceType directly on its public API
+        # and those values are populated at staging→jobs normalization time.
+        # Running the description-text extractors unconditionally would
+        # overwrite them (via COALESCE below), so for Ashby we only fall back
+        # to the description extractors when the API didn't supply a value.
+        # Not every Ashby posting includes a `compensation` block (e.g. many
+        # Notion postings) — for those the JD text is the only source.
+        if scraper_type == "ashby":
+            salary = extract_salary(desc) if row["salary_min"] is None else None
+            remote_policy = (
+                extract_remote_policy(desc, loc)
+                if row["remote_policy"] is None
+                else None
+            )
+        else:
+            salary = extract_salary(desc)
+            remote_policy = extract_remote_policy(desc, loc)
         skills = extract_skills(
             " ".join(part for part in [title, desc] if part), skill_matchers
         )

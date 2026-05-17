@@ -3,7 +3,12 @@ import os
 from airflow import DAG
 from datetime import datetime, timedelta, timezone
 
-from api.scrape_jobs import load_companies, scrape_greenhouse, save_results
+from api.scrape_jobs import (
+    load_companies,
+    scrape_all_companies,
+    save_results,
+    disable_dead_boards,
+)
 from datawarehouse.sync_companies import sync_companies
 from datawarehouse.dwh import (
     update_staging_jobs,
@@ -50,9 +55,19 @@ with DAG(
     sync = sync_companies(COMPANIES_FILE)
 
     # Step 1: Scrape and save to S3
-    greenhouse_companies = load_companies(COMPANIES_FILE, "greenhouse")
-    company_results = scrape_greenhouse.expand(company=greenhouse_companies)
+    # One mapped task handles every ATS — dispatch happens inside
+    # scrape_all_companies based on each company's scraper_type.  A failure
+    # for any single company returns a sentinel result rather than raising,
+    # so one bad board never kills the whole pipeline.
+    all_companies = load_companies(COMPANIES_FILE)
+    company_results = scrape_all_companies.expand(company=all_companies)
     s3_paths = save_results.expand(result=company_results)
+
+    # Step 1b: For companies that hit a permanent failure (HTTP 404/401/403),
+    # flip them to enabled=false in companies.yaml so the next run's
+    # sync_companies disables them in the DB.  Runs in parallel with the
+    # rest of the pipeline — it just consumes scrape results.
+    disable_dead = disable_dead_boards(company_results)
 
     # Step 2: Load from S3 into staging_jobs
     # Throttle concurrency to avoid exhausting Supabase's connection pool.
@@ -85,7 +100,7 @@ with DAG(
     )
 
     # Dependencies
-    sync >> greenhouse_companies
+    sync >> all_companies
     staging >> jobs >> extraction >> history
     history >> cleanup
     history >> analytics

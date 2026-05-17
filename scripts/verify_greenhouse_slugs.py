@@ -10,13 +10,14 @@ A valid, public board returns 200 with a JSON body containing a `jobs` array.
 Anything else (404, non-JSON, missing `jobs` key) means the slug is unusable
 for the pipeline and should not be added to companies.yaml.
 
-Usage:
-    python verify_greenhouse_slugs.py
-    python verify_greenhouse_slugs.py --yaml companies.yaml
-    python verify_greenhouse_slugs.py --out new_companies.yaml
-    python verify_greenhouse_slugs.py --slugs notion canva snowflake
+Usage (run from the project root):
+    python scripts/verify_greenhouse_slugs.py
+    python scripts/verify_greenhouse_slugs.py --yaml companies.yaml
+    python scripts/verify_greenhouse_slugs.py --out scripts/new_companies.yaml
+    python scripts/verify_greenhouse_slugs.py --slugs notion canva snowflake
 
-The script looks for companies.yaml in the current directory by default.
+The script looks for companies.yaml in the current working directory by
+default — invoke it from the project root so that relative path resolves.
 Use --yaml to point at a different path, or --no-diff to disable the check.
 """
 
