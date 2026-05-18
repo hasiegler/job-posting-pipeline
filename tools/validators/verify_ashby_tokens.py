@@ -18,10 +18,10 @@ preserves the original casing in the URL and generates a lowercase name key for
 companies.yaml (e.g. elevenlabs_ashby) to match the existing convention.
 
 Usage (run from the project root):
-    python scripts/verify_ashby_tokens.py
-    python scripts/verify_ashby_tokens.py --yaml companies.yaml
-    python scripts/verify_ashby_tokens.py --out scripts/new_ashby_companies.yaml
-    python scripts/verify_ashby_tokens.py --tokens ElevenLabs PostHog Vercel
+    python tools/validators/verify_ashby_tokens.py
+    python tools/validators/verify_ashby_tokens.py --yaml companies.yaml
+    python tools/validators/verify_ashby_tokens.py --out tools/validators/new_ashby_companies.yaml
+    python tools/validators/verify_ashby_tokens.py --tokens ElevenLabs PostHog Vercel
 
 The script looks for companies.yaml in the current working directory by
 default — invoke it from the project root so that relative path resolves.

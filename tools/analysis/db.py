@@ -34,7 +34,7 @@ from psycopg2.extras import RealDictCursor
 try:
     from dotenv import load_dotenv
 
-    _REPO_ROOT = Path(__file__).resolve().parent.parent
+    _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
     load_dotenv(_REPO_ROOT / ".env", override=False)
 except ImportError:
     pass
@@ -187,7 +187,7 @@ def write_md(
     out_dir = ensure_results_dir()
     path = out_dir / f"{query_name}.md"
 
-    lines = [f"# {title}", "", f"_Source: `analysis/{query_name}.py`_", ""]
+    lines = [f"# {title}", "", f"_Source: `tools/analysis/{query_name}.py`_", ""]
 
     bullets = list(bullets)
     if not bullets:

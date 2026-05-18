@@ -295,7 +295,7 @@ def main() -> int:
     summary_lines: list[str] = [
         f"# JobPulse — analysis summary ({RUN_DATE})",
         "",
-        f"_Generated {_now()} by `analysis/run_all.py`._",
+        f"_Generated {_now()} by `tools/analysis/run_all.py`._",
         "",
     ]
     for script in SCRIPTS:
@@ -320,7 +320,7 @@ def main() -> int:
     summary_lines.append("## Longitudinal archive")
     summary_lines.append("")
     summary_lines.append(
-        f"This run also wrote dated CSV snapshots to `analysis/results/history/` "
+        f"This run also wrote dated CSV snapshots to `tools/analysis/results/history/` "
         f"(gitignored). These accumulate across runs and are the source of truth "
         f"for cross-snapshot diffs (\"first week of the month vs last week\")."
     )

@@ -8,4 +8,4 @@ logs/
 
 .env
 
-analysis/results/
+tools/analysis/results/

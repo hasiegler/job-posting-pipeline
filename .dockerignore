@@ -1,0 +1,13 @@
+# Dev-time tooling — never included in the production image
+tools/
+
+# Local runtime artifacts
+venv/
+logs/
+output/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local config
+.env
