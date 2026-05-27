@@ -36,9 +36,10 @@ from datawarehouse.data_modification import (
 def update_staging_jobs(s3_path: str | None) -> dict | None:
     """Load a JSON file from S3 and insert its jobs into the staging_jobs table.
 
-    `s3_path` is `None` when the upstream scrape failed and `save_results`
-    returned None — in that case we no-op and return None so the rest of
-    the pipeline keeps moving with the companies that DID succeed.
+    `s3_path` is `None` when the upstream `scrape_all_companies` returned
+    a sentinel (the scrape was skipped) — in that case we no-op and return
+    None so the rest of the pipeline keeps moving with the companies that
+    DID succeed.
     """
     if s3_path is None:
         print("  Skipping staging load — upstream scrape was skipped.")

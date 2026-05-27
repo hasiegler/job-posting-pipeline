@@ -119,11 +119,16 @@ def _sentinel_result(company: dict, error_type: str, error: str) -> dict:
     `error_type` is either:
       - "permanent"  → `disable_dead_boards` will flip the YAML to enabled=false
       - "transient"  → skip this run only; next run retries
+
+    Shape mirrors the success-path summary (see `scrape_all_companies`) so
+    downstream mapped tasks can read the same keys for every map index.
+    `s3_path` is `None` so `update_staging_jobs` no-ops for skipped companies.
     """
     return {
         "company_name": company.get("name", "unknown"),
         "scraper_type": company.get("scraper_type"),
-        "jobs": [],
+        "s3_path": None,
+        "total_jobs": 0,
         "meta_total": None,
         "skipped": True,
         "error_type": error_type,
@@ -131,34 +136,96 @@ def _sentinel_result(company: dict, error_type: str, error: str) -> dict:
     }
 
 
+def _write_result_to_s3(result: dict) -> str:
+    """Write a scrape result envelope to S3 as JSON and return the s3:// URI.
+
+    Mirrors the layout the old `save_results` task wrote so the existing
+    `load_s3_json` / `insert_staging_jobs` consumers don't need to change.
+    Called inline from `scrape_all_companies` so the full jobs payload never
+    has to round-trip through Airflow's XCom backend.
+    """
+    import boto3
+
+    company_name = result["company_name"]
+    jobs = result["jobs"]
+
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    filename = f"{company_name}_{timestamp}.json"
+    s3_key = f"{company_name}/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
+
+    output = {
+        "company": company_name,
+        "scraped_at": now.isoformat(),
+        "total_jobs": len(jobs),
+        "meta_total": result.get("meta_total"),
+        "jobs": jobs,
+    }
+
+    json_data = json.dumps(output, indent=2, ensure_ascii=False)
+
+    bucket = os.environ["S3_BUCKET_NAME"]
+    s3_client = boto3.client("s3")
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=s3_key,
+        Body=json_data.encode("utf-8"),
+        ContentType="application/json",
+    )
+
+    s3_path = f"s3://{bucket}/{s3_key}"
+    print(f"  Saved {len(jobs)} jobs -> {s3_path}")
+    return s3_path
+
+
 @task
 def scrape_all_companies(company: dict) -> dict:
-    """Dispatch a single company's scrape to the appropriate ATS handler.
+    """Dispatch a single company's scrape to the appropriate ATS handler,
+    write the full result to S3, and return a lightweight summary.
 
     One mapped task in the DAG handles every ATS. Adding a new ATS (Lever, etc.)
     only requires registering a new handler below — no new DAG task needed.
+
+    The full jobs payload (potentially tens of MB of HTML per company) is
+    written directly to S3 here rather than returned to Airflow. Only a small
+    summary dict — the S3 path plus counts — is pushed to XCom, so the
+    metadata DB stays small and the worker subprocess can't get OOM-killed
+    serializing a giant return value.
 
     Any failure is captured here and returned as a sentinel result rather than
     raised, so one bad company doesn't fail the mapped task and cascade into
     the rest of the pipeline. Permanent failures (HTTP 404 / 401 / 403) are
     flagged so `disable_dead_boards` can flip them off in companies.yaml.
-    Transient failures (network, 5xx, partial responses, schema breaks) are
-    skipped only — the next run will retry.
+    Transient failures (network, 5xx, partial responses, schema breaks, and
+    S3 write errors) are skipped only — the next run will retry.
     """
     name = company.get("name", "unknown")
     scraper_type = company.get("scraper_type")
     try:
         if scraper_type == "greenhouse":
-            return scrape_greenhouse_jobs(company)
-        if scraper_type == "ashby":
+            result = scrape_greenhouse_jobs(company)
+        elif scraper_type == "ashby":
             from api.scrape_ashby import scrape_ashby_jobs
-            return scrape_ashby_jobs(company)
-        # Unknown scraper_type is a config bug — surface via sentinel rather
-        # than raising, so the rest of the run still completes.
-        logger.error(f"{name}: unknown scraper_type '{scraper_type}'")
-        return _sentinel_result(
-            company, "transient", f"unknown scraper_type '{scraper_type}'"
-        )
+            result = scrape_ashby_jobs(company)
+        else:
+            # Unknown scraper_type is a config bug — surface via sentinel
+            # rather than raising, so the rest of the run still completes.
+            logger.error(f"{name}: unknown scraper_type '{scraper_type}'")
+            return _sentinel_result(
+                company, "transient", f"unknown scraper_type '{scraper_type}'"
+            )
+
+        s3_path = _write_result_to_s3(result)
+        return {
+            "company_name": result["company_name"],
+            "scraper_type": scraper_type,
+            "s3_path": s3_path,
+            "total_jobs": len(result["jobs"]),
+            "meta_total": result.get("meta_total"),
+            "skipped": False,
+            "error_type": None,
+            "error": None,
+        }
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status in (404, 401, 403):
@@ -201,56 +268,6 @@ def scrape_all_companies(company: dict) -> dict:
         return _sentinel_result(
             company, "transient", f"{e.__class__.__name__}: {e}"
         )
-
-
-@task
-def save_results(result: dict) -> str | None:
-    """Write scraped jobs to S3 as JSON. Path: company/year/month/day/filename.json
-
-    Sentinel results from a failed scrape (see `_sentinel_result`) return
-    `None` instead of raising AirflowSkipException — the mapped instance
-    still "succeeds" so Airflow's all_success trigger doesn't cascade-skip
-    every downstream task. The downstream `update_staging_jobs` handles
-    `None` input by no-op'ing on that mapped index.
-    """
-    if result.get("skipped"):
-        name = result.get("company_name", "unknown")
-        err = result.get("error", "(no detail)")
-        print(f"  Skipping save for {name}: scrape failed ({err})")
-        return None
-
-    import boto3
-
-    company_name = result["company_name"]
-    jobs = result["jobs"]
-
-    now = datetime.now(timezone.utc)
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
-    filename = f"{company_name}_{timestamp}.json"
-    s3_key = f"{company_name}/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
-
-    output = {
-        "company": company_name,
-        "scraped_at": now.isoformat(),
-        "total_jobs": len(jobs),
-        "meta_total": result.get("meta_total"),
-        "jobs": jobs,
-    }
-
-    json_data = json.dumps(output, indent=2, ensure_ascii=False)
-
-    bucket = os.environ["S3_BUCKET_NAME"]
-    s3_client = boto3.client("s3")
-    s3_client.put_object(
-        Bucket=bucket,
-        Key=s3_key,
-        Body=json_data.encode("utf-8"),
-        ContentType="application/json",
-    )
-
-    s3_path = f"s3://{bucket}/{s3_key}"
-    print(f"  Saved {len(jobs)} jobs -> {s3_path}")
-    return s3_path
 
 
 def _disable_in_yaml(yaml_path: str, company_names: list[str]) -> list[str]:
@@ -393,8 +410,8 @@ if __name__ == "__main__":
     else:
         for company in companies:
             print(f"\n[{company['name']}]")
-            result = scrape_all_companies.function(company)
-            save_results.function(result)
+            summary = scrape_all_companies.function(company)
+            print(f"  -> {summary}")
             time.sleep(1)
 
         print("\nDone.")

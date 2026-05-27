@@ -103,9 +103,9 @@ def _extract_salary(compensation: Optional[dict]) -> dict:
 def scrape_ashby_jobs(company: dict) -> dict:
     """Scrape all listed jobs from a single Ashby public job board.
 
-    Returns the same envelope shape as the Greenhouse scraper so downstream
-    `save_results` / `insert_staging_jobs` / `normalize_ashby` can treat both
-    ATSes identically.
+    Returns the same envelope shape as the Greenhouse scraper so the
+    `scrape_all_companies` S3 writer, `insert_staging_jobs`, and
+    `normalize_ashby` downstream can treat both ATSes identically.
     """
     board_token = extract_board_token(company["url"])
     api_url = f"{ASHBY_API_BASE}/{board_token}"
