@@ -614,22 +614,34 @@ NORMALIZERS = {
 def process_staging_to_jobs(conn, cur) -> dict:
     """Process all unprocessed staging_jobs rows into the jobs table.
 
-    Uses bulk SQL operations instead of row-by-row queries:
-      1. Normalize every staging row in Python.
-      2. Load normalized data into a temp table.
-      3. Single LEFT JOIN to classify rows as new / changed / unchanged.
-      4. Bulk INSERT, UPDATE, and closed-detection via set-based SQL.
-      5. One UPDATE to mark all staging rows processed.
+    Memory-conscious design for a 2 GB droplet: a single `SELECT * FROM
+    staging_jobs` pulls every job's raw_data JSONB (kilobytes of HTML each)
+    into Python and OOM-kills the worker.  Instead we:
+
+      0. Discover which (company_id, scraper_type) pairs have unprocessed
+         staging rows.
+      1+2. For each pair, fetch only that company's staging rows, normalise
+         them in Python, and stream them into the _norm temp table.  Peak
+         Python memory is bounded to one company's payload at a time, not
+         the entire fleet.
+      3. Classify _norm against jobs with a single JOIN that builds the
+         changed-field list server-side via IS DISTINCT FROM — Python never
+         sees description_html columns from both sides at once.
+      4–8. Bulk INSERT / UPDATE / close-detect, all set-based SQL on the
+         server, then mark every staging row processed in one statement.
     """
+    # -- Phase 0: discover companies with unprocessed staging rows -------
     cur.execute("""
-        SELECT job_id, company_id, scraper_type, source_job_id, raw_data, scraped_at
+        SELECT DISTINCT company_id, scraper_type
         FROM staging_jobs
         WHERE processed = FALSE
-        ORDER BY company_id, job_id
+        ORDER BY company_id
     """)
-    staging_rows = cur.fetchall()
+    company_pairs = [
+        (r["company_id"], r["scraper_type"]) for r in cur.fetchall()
+    ]
 
-    if not staging_rows:
+    if not company_pairs:
         logger.info("No unprocessed staging rows found.")
         return {
             "inserted": 0,
@@ -640,57 +652,13 @@ def process_staging_to_jobs(conn, cur) -> dict:
             "changed_jobs": [],
         }
 
-    # -- Phase 1: normalise in Python, track companies --------------------
-    all_staging_ids = [r["job_id"] for r in staging_rows]
-    normalized = []
-    companies_seen = set()
-    company_metrics: dict[int, dict] = {}
+    company_metrics: dict[int, dict] = {
+        cid: _empty_company_metrics() for cid, _ in company_pairs
+    }
+    companies_seen: set[tuple[int, str]] = set(company_pairs)
+    all_staging_ids: list[int] = []
 
-    for row in staging_rows:
-        company_id = row["company_id"]
-        scraper_type = row["scraper_type"]
-        raw_data = row["raw_data"]
-        if isinstance(raw_data, str):
-            raw_data = json.loads(raw_data)
-
-        companies_seen.add((company_id, scraper_type))
-        company_metrics.setdefault(company_id, _empty_company_metrics())
-
-        normalizer = NORMALIZERS.get(scraper_type)
-        if not normalizer:
-            logger.warning(
-                f"No normalizer for scraper_type '{scraper_type}', "
-                f"skipping staging_id={row['job_id']}"
-            )
-            continue
-
-        norm = normalizer(raw_data)
-        normalized.append({
-            "staging_id": row["job_id"],
-            "company_id": company_id,
-            "scraper_type": scraper_type,
-            **norm,
-        })
-
-    if not normalized:
-        cur.execute(
-            "UPDATE staging_jobs SET processed = TRUE, processed_at = NOW() "
-            "WHERE job_id = ANY(%s)",
-            (all_staging_ids,),
-        )
-        conn.commit()
-        return {
-            "inserted": 0, "updated": 0, "unchanged": 0, "closed": 0,
-            "company_metrics": [], "changed_jobs": [],
-        }
-
-    # Deduplicate: keep latest staging row per (company_id, source_job_id)
-    seen_keys: dict[tuple, dict] = {}
-    for norm in normalized:
-        seen_keys[(norm["company_id"], norm["source_job_id"])] = norm
-    deduped = list(seen_keys.values())
-
-    # -- Phase 2: load into temp table ------------------------------------
+    # -- Create the _norm temp table once for the whole transaction -----
     # salary_* and remote_policy travel through _norm so ATSes that expose
     # those fields on their API (currently only Ashby) can populate them at
     # this step instead of relying on the description-text extractors.
@@ -718,59 +686,100 @@ def process_staging_to_jobs(conn, cur) -> dict:
         ) ON COMMIT DROP
     """)
 
-    execute_values(cur, """
-        INSERT INTO _norm (
-            staging_id, company_id, scraper_type, source_job_id, source_url,
-            title, location, departments, offices, language,
-            description_text, description_html, first_published_at,
-            salary_min, salary_max, salary_currency, salary_period, remote_policy
-        ) VALUES %s
-    """, [
-        (
-            r["staging_id"], r["company_id"], r["scraper_type"],
-            r["source_job_id"], r["source_url"], r["title"], r["location"],
-            r["departments"], r["offices"], r["language"],
-            r["description_text"], r["description_html"],
-            r["first_published_at"],
-            r["salary_min"], r["salary_max"], r["salary_currency"],
-            r["salary_period"], r["remote_policy"],
-        )
-        for r in deduped
-    ])
+    # -- Phase 1+2: per-company normalize + stream into _norm ------------
+    for company_id, scraper_type in company_pairs:
+        cur.execute("""
+            SELECT job_id, raw_data
+            FROM staging_jobs
+            WHERE processed = FALSE
+              AND company_id = %s
+              AND scraper_type = %s
+            ORDER BY job_id
+        """, (company_id, scraper_type))
+        staging_rows = cur.fetchall()
 
-    # -- Phase 3: classify with a single JOIN -----------------------------
-    # NOTE: salary_*/remote_policy are intentionally NOT in `compare_fields`
-    # below — those are API-sourced for some ATSes and extractor-sourced for
-    # others, so churn on those columns shouldn't classify a job as "changed".
+        all_staging_ids.extend(r["job_id"] for r in staging_rows)
+
+        normalizer = NORMALIZERS.get(scraper_type)
+        if not normalizer:
+            logger.warning(
+                f"No normalizer for scraper_type '{scraper_type}', "
+                f"skipping company_id={company_id} ({len(staging_rows)} rows)"
+            )
+            continue
+
+        # Deduplicate within this company by source_job_id; rows arrive in
+        # job_id ASC so last-write-wins matches the prior implementation.
+        deduped: dict[str, dict] = {}
+        for row in staging_rows:
+            raw_data = row["raw_data"]
+            if isinstance(raw_data, str):
+                raw_data = json.loads(raw_data)
+            norm = normalizer(raw_data)
+            deduped[norm["source_job_id"]] = {
+                "staging_id": row["job_id"],
+                "company_id": company_id,
+                "scraper_type": scraper_type,
+                **norm,
+            }
+        # Free this company's raw payload before building the INSERT.
+        del staging_rows
+
+        if not deduped:
+            continue
+
+        execute_values(cur, """
+            INSERT INTO _norm (
+                staging_id, company_id, scraper_type, source_job_id, source_url,
+                title, location, departments, offices, language,
+                description_text, description_html, first_published_at,
+                salary_min, salary_max, salary_currency, salary_period, remote_policy
+            ) VALUES %s
+        """, [
+            (
+                r["staging_id"], r["company_id"], r["scraper_type"],
+                r["source_job_id"], r["source_url"], r["title"], r["location"],
+                r["departments"], r["offices"], r["language"],
+                r["description_text"], r["description_html"],
+                r["first_published_at"],
+                r["salary_min"], r["salary_max"], r["salary_currency"],
+                r["salary_period"], r["remote_policy"],
+            )
+            for r in deduped.values()
+        ])
+        del deduped
+
+    # -- Phase 3: classify with server-side change detection -------------
+    # NOTE: salary_*/remote_policy are intentionally NOT compared here —
+    # those are API-sourced for some ATSes and extractor-sourced for others,
+    # so churn on those columns shouldn't classify a job as "changed".
+    # IS DISTINCT FROM treats NULL-vs-NULL as equal (unlike `=`).
+    # The CASE expressions build a TEXT[] of just the field names that
+    # changed; description_text/description_html never travel back to Python.
     cur.execute("""
         SELECT
-            n.staging_id, n.company_id, n.scraper_type, n.source_job_id,
-            n.source_url,        n.title,        n.location,
-            n.departments,       n.offices,      n.language,
-            n.description_text,  n.description_html, n.first_published_at,
-            j.job_id           AS existing_job_id,
-            j.source_url       AS old_source_url,
-            j.title            AS old_title,
-            j.location         AS old_location,
-            j.departments      AS old_departments,
-            j.offices          AS old_offices,
-            j.language         AS old_language,
-            j.description_text AS old_description_text,
-            j.description_html AS old_description_html,
-            j.first_published_at AS old_first_published_at,
-            j.is_active        AS old_is_active
+            n.staging_id,
+            n.company_id,
+            n.source_job_id,
+            j.job_id   AS existing_job_id,
+            j.is_active AS old_is_active,
+            ARRAY_REMOVE(ARRAY[
+                CASE WHEN j.source_url         IS DISTINCT FROM n.source_url         THEN 'source_url' END,
+                CASE WHEN j.title              IS DISTINCT FROM n.title              THEN 'title' END,
+                CASE WHEN j.location           IS DISTINCT FROM n.location           THEN 'location' END,
+                CASE WHEN j.departments        IS DISTINCT FROM n.departments        THEN 'departments' END,
+                CASE WHEN j.offices            IS DISTINCT FROM n.offices            THEN 'offices' END,
+                CASE WHEN j.language           IS DISTINCT FROM n.language           THEN 'language' END,
+                CASE WHEN j.description_text   IS DISTINCT FROM n.description_text   THEN 'description_text' END,
+                CASE WHEN j.description_html   IS DISTINCT FROM n.description_html   THEN 'description_html' END,
+                CASE WHEN j.first_published_at IS DISTINCT FROM n.first_published_at THEN 'first_published_at' END
+            ]::text[], NULL) AS changed_fields
         FROM _norm n
         LEFT JOIN jobs j
             ON  j.company_id    = n.company_id
             AND j.source_job_id = n.source_job_id
     """)
     classified = cur.fetchall()
-
-    compare_fields = [
-        "source_url", "title", "location", "departments", "offices",
-        "language", "description_text", "description_html",
-        "first_published_at",
-    ]
 
     new_staging_ids: list[int] = []
     changed_job_ids: list[int] = []
@@ -781,31 +790,29 @@ def process_staging_to_jobs(conn, cur) -> dict:
         cid = row["company_id"]
         if row["existing_job_id"] is None:
             new_staging_ids.append(row["staging_id"])
-        else:
-            changed_fields = [
-                f for f in compare_fields
-                if row[f] != row[f"old_{f}"]
-            ]
-            reactivated = not row["old_is_active"]
+            continue
 
-            if changed_fields or reactivated:
-                changed_job_ids.append(row["existing_job_id"])
-                company_metrics[cid]["updated"] += 1
-                change_type = "reactivated" if reactivated else "updated"
-                changed_jobs.append({
-                    "job_id": row["existing_job_id"],
-                    "change_type": change_type,
-                    "changed_fields": changed_fields,
-                })
-                if reactivated:
-                    logger.info(f"Reactivated job {row['source_job_id']}")
-                else:
-                    logger.info(
-                        f"Updated job {row['source_job_id']}: {changed_fields}"
-                    )
+        changed_fields = list(row["changed_fields"] or [])
+        reactivated = not row["old_is_active"]
+
+        if changed_fields or reactivated:
+            changed_job_ids.append(row["existing_job_id"])
+            company_metrics[cid]["updated"] += 1
+            change_type = "reactivated" if reactivated else "updated"
+            changed_jobs.append({
+                "job_id": row["existing_job_id"],
+                "change_type": change_type,
+                "changed_fields": changed_fields,
+            })
+            if reactivated:
+                logger.info(f"Reactivated job {row['source_job_id']}")
             else:
-                unchanged_job_ids.append(row["existing_job_id"])
-                company_metrics[cid]["unchanged"] += 1
+                logger.info(
+                    f"Updated job {row['source_job_id']}: {changed_fields}"
+                )
+        else:
+            unchanged_job_ids.append(row["existing_job_id"])
+            company_metrics[cid]["unchanged"] += 1
 
     # -- Phase 4: bulk INSERT new jobs ------------------------------------
     inserted = 0
@@ -939,26 +946,26 @@ def process_staging_to_jobs(conn, cur) -> dict:
 def extract_fields_from_jobs(conn, cur) -> dict:
     """Run field extraction on all jobs that haven't been extracted yet.
 
-    Extraction itself (salary, remote policy, skills) must run in Python,
-    but the resulting updates are applied in a single bulk UPDATE via a
-    temp table rather than one UPDATE per row.
+    Memory-conscious: jobs are fetched and extracted one company at a time
+    so the description_text column for tens of thousands of unextracted
+    rows never lands in Python memory at once.  Extraction itself (salary,
+    remote policy, skills) still runs in Python; the per-company batches
+    are accumulated into a single _extraction temp table and applied via
+    one bulk UPDATE at the end.
     """
     skill_matchers = build_skill_matchers(cur)
     skill_exclusions = build_company_skill_exclusions(cur)
 
     cur.execute("""
-        SELECT
-            job_id, company_id, scraper_type,
-            title, description_text, location,
-            salary_min, remote_policy
+        SELECT DISTINCT company_id
         FROM jobs
         WHERE extracted_at IS NULL
           AND is_active = TRUE
-        ORDER BY job_id
+        ORDER BY company_id
     """)
-    rows = cur.fetchall()
+    company_ids = [r["company_id"] for r in cur.fetchall()]
 
-    if not rows:
+    if not company_ids:
         logger.info("No unextracted jobs found.")
         return {
             "processed": 0,
@@ -968,74 +975,7 @@ def extract_fields_from_jobs(conn, cur) -> dict:
             "company_metrics": [],
         }
 
-    processed = 0
-    salary_found = 0
-    remote_policy_found = 0
-    skills_found = 0
-    company_metrics: dict[int, dict] = {}
-    extraction_tuples: list[tuple] = []
-
-    for row in rows:
-        job_id = row["job_id"]
-        company_id = row["company_id"]
-        scraper_type = row["scraper_type"]
-        title = row["title"]
-        desc = row["description_text"]
-        loc = row["location"]
-
-        company_metrics.setdefault(company_id, _empty_company_metrics())
-        company_metrics[company_id]["extraction_attempted"] += 1
-
-        # Ashby exposes salary and workplaceType directly on its public API
-        # and those values are populated at staging→jobs normalization time.
-        # Running the description-text extractors unconditionally would
-        # overwrite them (via COALESCE below), so for Ashby we only fall back
-        # to the description extractors when the API didn't supply a value.
-        # Not every Ashby posting includes a `compensation` block (e.g. many
-        # Notion postings) — for those the JD text is the only source.
-        if scraper_type == "ashby":
-            salary = extract_salary(desc) if row["salary_min"] is None else None
-            remote_policy = (
-                extract_remote_policy(desc, loc)
-                if row["remote_policy"] is None
-                else None
-            )
-        else:
-            salary = extract_salary(desc)
-            remote_policy = extract_remote_policy(desc, loc)
-        skills = extract_skills(
-            " ".join(part for part in [title, desc] if part), skill_matchers
-        )
-        excluded = skill_exclusions.get(company_id)
-        if excluded and skills:
-            skills = [s for s in skills if s not in excluded]
-
-        s_min = s_max = s_curr = s_period = None
-        if salary:
-            s_min = salary.salary_min
-            s_max = salary.salary_max
-            s_curr = salary.salary_currency
-            s_period = salary.salary_period
-            salary_found += 1
-            company_metrics[company_id]["salary_found"] += 1
-
-        rp = None
-        if remote_policy:
-            rp = remote_policy
-            remote_policy_found += 1
-            company_metrics[company_id]["remote_policy_found"] += 1
-
-        if skills:
-            skills_found += 1
-            company_metrics[company_id]["skills_found"] += 1
-
-        extraction_tuples.append((
-            job_id, s_min, s_max, s_curr, s_period,
-            rp, skills, EXTRACTION_VERSION,
-        ))
-        processed += 1
-
-    # -- Bulk UPDATE via temp table ---------------------------------------
+    # -- Create temp table once for the whole transaction ----------------
     cur.execute("""
         CREATE TEMP TABLE _extraction (
             job_id             INTEGER,
@@ -1049,12 +989,103 @@ def extract_fields_from_jobs(conn, cur) -> dict:
         ) ON COMMIT DROP
     """)
 
-    execute_values(
-        cur,
-        "INSERT INTO _extraction VALUES %s",
-        extraction_tuples,
-    )
+    processed = 0
+    salary_found = 0
+    remote_policy_found = 0
+    skills_found = 0
+    company_metrics: dict[int, dict] = {}
 
+    # -- Per-company: fetch, extract, stream into _extraction ------------
+    for company_id in company_ids:
+        cur.execute("""
+            SELECT
+                job_id, scraper_type,
+                title, description_text, location,
+                salary_min, remote_policy
+            FROM jobs
+            WHERE extracted_at IS NULL
+              AND is_active = TRUE
+              AND company_id = %s
+            ORDER BY job_id
+        """, (company_id,))
+        rows = cur.fetchall()
+
+        if not rows:
+            continue
+
+        company_metrics.setdefault(company_id, _empty_company_metrics())
+        excluded = skill_exclusions.get(company_id)
+        extraction_tuples: list[tuple] = []
+
+        for row in rows:
+            job_id = row["job_id"]
+            scraper_type = row["scraper_type"]
+            title = row["title"]
+            desc = row["description_text"]
+            loc = row["location"]
+
+            company_metrics[company_id]["extraction_attempted"] += 1
+
+            # Ashby exposes salary and workplaceType directly on its public
+            # API and those values are populated at staging→jobs normalization
+            # time.  Running the description-text extractors unconditionally
+            # would overwrite them (via COALESCE below), so for Ashby we only
+            # fall back to the description extractors when the API didn't
+            # supply a value.  Not every Ashby posting includes a `compensation`
+            # block (e.g. many Notion postings) — for those the JD text is
+            # the only source.
+            if scraper_type == "ashby":
+                salary = extract_salary(desc) if row["salary_min"] is None else None
+                remote_policy = (
+                    extract_remote_policy(desc, loc)
+                    if row["remote_policy"] is None
+                    else None
+                )
+            else:
+                salary = extract_salary(desc)
+                remote_policy = extract_remote_policy(desc, loc)
+            skills = extract_skills(
+                " ".join(part for part in [title, desc] if part), skill_matchers
+            )
+            if excluded and skills:
+                skills = [s for s in skills if s not in excluded]
+
+            s_min = s_max = s_curr = s_period = None
+            if salary:
+                s_min = salary.salary_min
+                s_max = salary.salary_max
+                s_curr = salary.salary_currency
+                s_period = salary.salary_period
+                salary_found += 1
+                company_metrics[company_id]["salary_found"] += 1
+
+            rp = None
+            if remote_policy:
+                rp = remote_policy
+                remote_policy_found += 1
+                company_metrics[company_id]["remote_policy_found"] += 1
+
+            if skills:
+                skills_found += 1
+                company_metrics[company_id]["skills_found"] += 1
+
+            extraction_tuples.append((
+                job_id, s_min, s_max, s_curr, s_period,
+                rp, skills, EXTRACTION_VERSION,
+            ))
+            processed += 1
+
+        # Release the per-company description payload before the INSERT.
+        del rows
+
+        execute_values(
+            cur,
+            "INSERT INTO _extraction VALUES %s",
+            extraction_tuples,
+        )
+        del extraction_tuples
+
+    # -- Bulk UPDATE jobs from the accumulated _extraction table ---------
     cur.execute("""
         UPDATE jobs SET
             salary_min         = COALESCE(e.salary_min, jobs.salary_min),
