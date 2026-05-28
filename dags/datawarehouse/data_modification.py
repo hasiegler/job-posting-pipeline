@@ -174,36 +174,40 @@ def ensure_job_history_table(conn, cur) -> None:
 
 
 def snapshot_changed_jobs(conn, cur, changed_jobs: list[dict]) -> dict:
-    """Write a history row for each changed job, capturing its current state."""
+    """Write a history row for each changed job, capturing its current state.
+
+    Memory-conscious: the row data (including description_html) is copied
+    from `jobs` to `job_history` entirely server-side via INSERT ... SELECT,
+    joining against a small temp table of (job_id, change_type,
+    changed_fields).  Without this, a big-delta run (e.g. first run, batch
+    onboarding, backfill) would SELECT every changed job's full HTML into
+    Python and then build a giant INSERT string from it — OOM-killing the
+    task on a 2 GB droplet.
+    """
     ensure_job_history_table(conn, cur)
 
     if not changed_jobs:
         return {"snapshots_written": 0}
 
-    job_ids = [row["job_id"] for row in changed_jobs]
-    change_map = {
-        row["job_id"]: {
-            "change_type": row["change_type"],
-            "changed_fields": row.get("changed_fields", []),
-        }
-        for row in changed_jobs
-    }
-
-    cur.execute(
-        """
-        SELECT job_id, company_id, source_job_id, title, source_url, location,
-               departments, offices, language, description_text, description_html,
-               skills, salary_min, salary_max, salary_currency, salary_period,
-               remote_policy, experience_level, education_required, benefits,
-               first_published_at, is_active
-        FROM jobs
-        WHERE job_id = ANY(%s)
-        """,
-        (job_ids,),
-    )
-    rows = cur.fetchall()
-
+    # Stream only the small change-classification tuples into a temp table;
+    # the actual job row data stays inside Postgres.
+    cur.execute("""
+        CREATE TEMP TABLE _changes (
+            job_id         INTEGER PRIMARY KEY,
+            change_type    TEXT,
+            changed_fields TEXT[]
+        ) ON COMMIT DROP
+    """)
     execute_values(cur, """
+        INSERT INTO _changes (job_id, change_type, changed_fields) VALUES %s
+    """, [
+        (row["job_id"], row["change_type"], row.get("changed_fields", []))
+        for row in changed_jobs
+    ])
+
+    # Copy each changed job's current state into job_history in a single
+    # server-side statement.  No row data round-trips through Python.
+    cur.execute("""
         INSERT INTO job_history (
             job_id, company_id, source_job_id, change_type, changed_fields,
             title, source_url, location, departments, offices, language,
@@ -211,26 +215,23 @@ def snapshot_changed_jobs(conn, cur, changed_jobs: list[dict]) -> dict:
             salary_min, salary_max, salary_currency, salary_period,
             remote_policy, experience_level, education_required, benefits,
             first_published_at, is_active
-        ) VALUES %s
-    """, [
-        (
-            row["job_id"], row["company_id"], row["source_job_id"],
-            change_map[row["job_id"]]["change_type"],
-            change_map[row["job_id"]]["changed_fields"],
-            row["title"], row["source_url"], row["location"],
-            row["departments"], row["offices"], row["language"],
-            row["description_text"], row["description_html"],
-            row["skills"], row["salary_min"], row["salary_max"],
-            row["salary_currency"], row["salary_period"],
-            row["remote_policy"], row["experience_level"],
-            row["education_required"], row["benefits"],
-            row["first_published_at"], row["is_active"],
         )
-        for row in rows
-    ])
+        SELECT
+            j.job_id, j.company_id, j.source_job_id,
+            c.change_type, c.changed_fields,
+            j.title, j.source_url, j.location,
+            j.departments, j.offices, j.language,
+            j.description_text, j.description_html, j.skills,
+            j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
+            j.remote_policy, j.experience_level, j.education_required, j.benefits,
+            j.first_published_at, j.is_active
+        FROM jobs j
+        JOIN _changes c ON c.job_id = j.job_id
+    """)
+    written = cur.rowcount
 
     conn.commit()
-    return {"snapshots_written": len(rows)}
+    return {"snapshots_written": written}
 
 
 def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[dict]) -> None:
