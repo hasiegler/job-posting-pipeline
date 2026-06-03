@@ -23,6 +23,9 @@ from urllib.parse import urlparse
 
 import requests
 
+from alerting import send_alert
+from datawarehouse.data_utils import run_with_db
+
 logger = logging.getLogger(__name__)
 
 ASHBY_API_BASE = "https://api.ashbyhq.com/posting-api/job-board"
@@ -35,6 +38,33 @@ _WORKPLACE_TYPE_MAP = {
     "Hybrid": "Hybrid",
     "OnSite": "On-Site",
 }
+
+
+def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
+    """Return ``scraped_jobs`` from this company's most recent
+    ``company_run_metrics`` row, or ``None`` if it has no rows yet (i.e. this
+    company has never been scraped successfully before).
+
+    "Most recent row" is treated as "most recent successful, non-skipped scrape"
+    because skipped scrapes don't write a ``company_run_metrics`` row — see
+    ``finalize_run_metrics`` in ``dwh.py`` (skipped staging summaries are
+    filtered out before the per-company aggregation runs).
+    """
+    def _q(conn, cur):
+        cur.execute(
+            """
+            SELECT scraped_jobs
+            FROM company_run_metrics
+            WHERE company_name = %s
+            ORDER BY run_started_at DESC
+            LIMIT 1
+            """,
+            (company_name,),
+        )
+        row = cur.fetchone()
+        return row["scraped_jobs"] if row else None
+
+    return run_with_db(_q)
 
 
 def extract_board_token(url: str) -> str:
@@ -150,6 +180,37 @@ def scrape_ashby_jobs(company: dict) -> dict:
             }
         )
 
-    # Ashby's posting-api response has no meta.total equivalent, so there's no
-    # partial-response guardrail to apply here.
+    # Ashby's posting-api response has no meta.total equivalent, so we use a
+    # regression heuristic instead: compare today's count to this company's
+    # most recent successful scrape and trip on a hard zero-floor or a >50%
+    # drop.  Trip routes through the same RuntimeError → "transient" sentinel
+    # path the Greenhouse meta.total guard uses, so the board is skipped this
+    # run only — no S3 write, no staging insert, no auto-disable.
+    today_count = len(jobs)
+    baseline = _get_baseline_scraped_jobs(company["name"])
+
+    if today_count == 0 and baseline is not None and baseline > 0:
+        send_alert(
+            f"[Ashby] {company['name']}: zero-floor trip — fetched 0 jobs "
+            f"vs baseline={baseline}. Skipping this run."
+        )
+        raise RuntimeError(
+            f"{company['name']}: Ashby completeness guard zero-floor "
+            f"(today_count=0, baseline={baseline})."
+        )
+    if (
+        baseline is not None
+        and baseline >= 10
+        and today_count < baseline * 0.5
+    ):
+        send_alert(
+            f"[Ashby] {company['name']}: percentage-drop trip — fetched "
+            f"{today_count} jobs vs baseline={baseline} (<50%). "
+            f"Skipping this run."
+        )
+        raise RuntimeError(
+            f"{company['name']}: Ashby completeness guard percentage-drop "
+            f"(today_count={today_count}, baseline={baseline})."
+        )
+
     return {"company_name": company["name"], "jobs": jobs, "meta_total": None}

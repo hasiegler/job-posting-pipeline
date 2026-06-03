@@ -15,6 +15,8 @@ from bs4 import BeautifulSoup
 import requests
 import yaml
 
+from alerting import send_alert
+
 try:
     from airflow.decorators import task
 except ImportError:
@@ -77,6 +79,11 @@ def scrape_greenhouse_jobs(company: dict) -> dict:
     # close+reactivate cycles.
     meta_total = body.get("meta", {}).get("total")
     if meta_total is not None and meta_total != len(raw_jobs):
+        send_alert(
+            f"[Greenhouse] {company['name']}: partial response — "
+            f"meta.total={meta_total}, received={len(raw_jobs)}. "
+            f"Skipping this run."
+        )
         raise RuntimeError(
             f"{company['name']}: Greenhouse reported meta.total={meta_total} "
             f"but returned {len(raw_jobs)} jobs — refusing partial response."
