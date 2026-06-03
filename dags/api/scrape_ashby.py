@@ -42,20 +42,36 @@ _WORKPLACE_TYPE_MAP = {
 
 def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
     """Return ``scraped_jobs`` from this company's most recent
-    ``company_run_metrics`` row, or ``None`` if it has no rows yet (i.e. this
-    company has never been scraped successfully before).
+    ``company_run_metrics`` row with ``scraped_jobs > 0``, or ``None`` if no
+    such row exists.
 
-    "Most recent row" is treated as "most recent successful, non-skipped scrape"
-    because skipped scrapes don't write a ``company_run_metrics`` row — see
-    ``finalize_run_metrics`` in ``dwh.py`` (skipped staging summaries are
-    filtered out before the per-company aggregation runs).
+    The ``scraped_jobs > 0`` filter restricts the baseline to runs that
+    reflect a real successful scrape.  It excludes:
+
+    * Skipped runs.  ``finalize_run_metrics`` in ``dwh.py`` does not write a
+      row directly for skipped scrapes (the staging-summary loop filters out
+      ``None`` entries), but a row CAN still get written for a skipped
+      company via the jobs-summary loop (carry-over unprocessed staging from
+      a prior failed run) or the extraction loop (un-extracted active jobs
+      from earlier).  In both carry-over paths ``scraped_jobs`` is hard-set
+      to ``0`` because only the loop that actually populates ``scraped_jobs``
+      is the staging-summary loop, which the skipped scrape never reaches.
+    * Carry-over rows where the company appeared only via staging or
+      extraction work, which by the same mechanism have ``scraped_jobs = 0``.
+
+    Known limitation: a company with a legitimate zero-listing successful
+    scrape (the board is live but currently has no postings) is also
+    excluded by this filter.  That's an acceptable tradeoff because a
+    zero-baseline company can't be meaningfully regression-checked anyway —
+    rule (a) needs ``baseline > 0`` and rule (b) needs ``baseline >= 10``,
+    so a 0-baseline never trips either rule even when included.
     """
     def _q(conn, cur):
         cur.execute(
             """
             SELECT scraped_jobs
             FROM company_run_metrics
-            WHERE company_name = %s
+            WHERE company_name = %s AND scraped_jobs > 0
             ORDER BY run_started_at DESC
             LIMIT 1
             """,
