@@ -46,7 +46,7 @@ with DAG(
     schedule=_dag_schedule(),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=timedelta(hours=1),
+    dagrun_timeout=timedelta(hours=6),
     is_paused_upon_creation=True,
 ) as dag:
 
