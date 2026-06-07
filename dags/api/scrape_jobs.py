@@ -122,11 +122,11 @@ _REQUIRED_FIELDS_GREENHOUSE = {
 }
 
 _REQUIRED_FIELDS_ASHBY = {
-    "source_job_id":  "id",
-    "source_url":     "url",
-    "title":          "title",
-    "location":       "location",
-    "description_text": "content_text",
+    "source_job_id":    "id",
+    "source_url":       "jobUrl",         # raw Ashby field (was "url" in shaped dict)
+    "title":            "title",
+    "location":         "location",       # primary location — flat string in raw Ashby
+    "description_text": "descriptionPlain",  # raw Ashby field (was "content_text")
 }
 
 _REQUIRED_FIELDS_BY_SCRAPER: dict[str, dict[str, str]] = {
@@ -460,6 +460,15 @@ def disable_dead_boards(
             "  (To enable auto-disable in the future, make companies.yaml "
             "writable by the Airflow worker, e.g. `chmod 666 companies.yaml`)"
         )
+        detail = "\n".join(
+            f"  {r['company_name']}: {r.get('error', '?')}" for r in permanent
+        )
+        send_alert(
+            f"[DEAD BOARD — MANUAL ACTION REQUIRED] "
+            f"{len(permanent)} board(s) returned HTTP 404/401/403 but "
+            f"companies.yaml could not be updated ({e.__class__.__name__}). "
+            f"Set enabled: false manually for:\n{detail}"
+        )
         return {
             "disabled": [],
             "permanent_failures": [
@@ -476,6 +485,17 @@ def disable_dead_boards(
         cname = r["company_name"]
         marker = "disabled in YAML" if cname in flipped_set else "already disabled"
         print(f"    [{marker}] {cname}")
+
+    if flipped:
+        detail = "\n".join(
+            f"  {r['company_name']}: {r.get('error', '?')}" for r in permanent
+            if r["company_name"] in flipped_set
+        )
+        send_alert(
+            f"[DEAD BOARD DISABLED] "
+            f"{len(flipped)} board(s) auto-disabled in companies.yaml "
+            f"(HTTP 404/401/403 — will be removed from next run):\n{detail}"
+        )
 
     return {
         "disabled": flipped,

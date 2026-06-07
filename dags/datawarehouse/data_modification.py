@@ -621,31 +621,95 @@ def normalize_greenhouse(raw_data: dict) -> dict:
     }
 
 
-def normalize_ashby(raw_data: dict) -> dict:
-    """Normalize an Ashby raw_data JSONB object to the jobs table schema.
+# ---------------------------------------------------------------------------
+# Ashby normalizer helpers.
+#
+# These mirror the logic previously baked into scrape_ashby.py's reshape loop.
+# They're duplicated here (not imported) to avoid a cross-package dependency
+# between api/ and datawarehouse/.
+# ---------------------------------------------------------------------------
+_ASHBY_WORKPLACE_TYPE_MAP: dict[str, str] = {
+    "Remote": "Remote",
+    "Hybrid": "Hybrid",
+    "OnSite": "On-Site",   # Ashby returns "OnSite"; canonical is "On-Site"
+}
 
-    Unlike Greenhouse, Ashby provides salary and remote-policy directly on the
-    posting via its API, so those fields are populated here rather than left
-    to the description-text extractors downstream.  `extract_fields_from_jobs`
-    skips `extract_salary`/`extract_remote_policy` for scraper_type='ashby' to
-    avoid overwriting these API-sourced values.
+
+def _ashby_combine_locations(raw_data: dict) -> str | None:
+    """Concatenate primary location and secondaryLocations[].location with '; '."""
+    primary = raw_data.get("location")
+    secondary = [
+        loc.get("location")
+        for loc in (raw_data.get("secondaryLocations") or [])
+        if loc.get("location")
+    ]
+    parts = [p for p in [primary, *secondary] if p]
+    return "; ".join(parts) if parts else None
+
+
+def _ashby_extract_salary(compensation) -> dict:
+    """Extract salary min/max/currency/period from an Ashby compensation object."""
+    empty: dict = {
+        "salary_min": None,
+        "salary_max": None,
+        "salary_currency": None,
+        "salary_period": None,
+    }
+    if not compensation:
+        return empty
+    for comp in (compensation.get("summaryComponents") or []):
+        if comp.get("compensationType") != "Salary":
+            continue
+        if comp.get("minValue") is None or comp.get("maxValue") is None:
+            continue
+        interval = (comp.get("interval") or "").upper()
+        if interval == "1 YEAR":
+            period: str | None = "yearly"
+        elif interval == "1 HOUR":
+            period = "hourly"
+        else:
+            period = None
+        return {
+            "salary_min": comp.get("minValue"),
+            "salary_max": comp.get("maxValue"),
+            "salary_currency": comp.get("currencyCode"),
+            "salary_period": period,
+        }
+    return empty
+
+
+def normalize_ashby(raw_data: dict) -> dict:
+    """Normalize a raw Ashby API job object to the jobs table schema.
+
+    raw_data is the verbatim JSON object from body["jobs"] as stored in
+    staging_jobs.raw_data.  Field names are the Ashby API names (jobUrl,
+    descriptionHtml/Plain, publishedAt, workplaceType, compensation, etc.) —
+    NOT the pre-shaped names the old scraper used.
+
+    Unlike Greenhouse, Ashby provides salary and remote_policy directly on the
+    posting via its API, so those fields are populated here.
+    `extract_fields_from_jobs` respects them and only falls back to the
+    description-text extractors when the API didn't supply a value.
     """
+    salary = _ashby_extract_salary(raw_data.get("compensation"))
+    dept = raw_data.get("department")
+
     return {
         "source_job_id": str(raw_data.get("id", "")),
-        "source_url": raw_data.get("url"),
+        "source_url": raw_data.get("jobUrl"),
         "title": raw_data.get("title"),
-        "location": raw_data.get("location"),
-        "departments": raw_data.get("departments", []),
-        "offices": raw_data.get("offices", []),
-        "language": raw_data.get("language"),
-        "description_text": raw_data.get("content_text"),
-        "description_html": raw_data.get("content_html"),
-        "first_published_at": _parse_timestamp(raw_data.get("first_published")),
-        "salary_min": raw_data.get("salary_min"),
-        "salary_max": raw_data.get("salary_max"),
-        "salary_currency": raw_data.get("salary_currency"),
-        "salary_period": raw_data.get("salary_period"),
-        "remote_policy": raw_data.get("remote_policy"),
+        "location": _ashby_combine_locations(raw_data),
+        "departments": [dept] if dept else [],
+        "offices": [],
+        "language": None,
+        "description_text": raw_data.get("descriptionPlain") or None,
+        "description_html": raw_data.get("descriptionHtml"),
+        "first_published_at": _parse_timestamp(raw_data.get("publishedAt")),
+        "salary_min": salary["salary_min"],
+        "salary_max": salary["salary_max"],
+        "salary_currency": salary["salary_currency"],
+        "salary_period": salary["salary_period"],
+        "remote_policy": _ASHBY_WORKPLACE_TYPE_MAP.get(raw_data.get("workplaceType")),
         "skills": None,
         "experience_level": None,
         "education_required": None,
@@ -1228,9 +1292,11 @@ def insert_staging_jobs(conn, cur, data: dict) -> int:
         conn.commit()
         return 0
 
-    # Greenhouse jobs are now raw API objects; source_url lives under
-    # "absolute_url".  Ashby jobs are still pre-shaped; source_url is "url".
-    url_key = "absolute_url" if scraper_type == "greenhouse" else "url"
+    # Both Greenhouse and Ashby jobs are now raw API objects.
+    # Greenhouse:  source_url → "absolute_url"
+    # Ashby:       source_url → "jobUrl"
+    _URL_KEYS = {"greenhouse": "absolute_url", "ashby": "jobUrl"}
+    url_key = _URL_KEYS.get(scraper_type, "url")
 
     execute_values(cur, """
         INSERT INTO staging_jobs

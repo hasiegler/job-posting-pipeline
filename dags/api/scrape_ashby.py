@@ -166,35 +166,12 @@ def scrape_ashby_jobs(company: dict) -> dict:
 
     print(f"  Found {len(raw_jobs)} listed jobs.")
 
-    jobs = []
-    for raw in raw_jobs:
-        title = (raw.get("title") or "").strip()
-        if not title:
-            continue
-
-        department = raw.get("department")
-        departments = [department] if department else []
-
-        remote_policy = _WORKPLACE_TYPE_MAP.get(raw.get("workplaceType"))
-        salary = _extract_salary(raw.get("compensation"))
-
-        jobs.append(
-            {
-                "id": raw.get("id"),
-                "title": title,
-                "url": raw.get("jobUrl"),
-                "location": _combine_locations(raw),
-                "departments": departments,
-                "offices": [],
-                "content_html": raw.get("descriptionHtml"),
-                "content_text": raw.get("descriptionPlain"),
-                "language": None,
-                "first_published": raw.get("publishedAt"),
-                "updated_at": None,
-                "remote_policy": remote_policy,
-                **salary,
-            }
-        )
+    # Store raw API objects exactly as received.  Only filter out unlisted jobs
+    # (isListed guard above) and jobs with no title (unpublished drafts).  All
+    # other fields (jobUrl, location, secondaryLocations, department,
+    # descriptionHtml, descriptionPlain, workplaceType, compensation, etc.) are
+    # preserved verbatim so normalize_ashby can work from the pristine source.
+    jobs = [raw for raw in raw_jobs if (raw.get("title") or "").strip()]
 
     # Ashby's posting-api response has no meta.total equivalent, so we use a
     # regression heuristic instead: compare today's count to this company's

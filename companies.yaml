@@ -478,7 +478,7 @@ companies:
   - name: growtherapy_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/growtherapy
-    enabled: true
+    enabled: false
 
   - name: stockx_greenhouse
     scraper_type: greenhouse
@@ -823,4 +823,9 @@ companies:
   - name: watershed_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/watershed
+    enabled: true
+
+  - name: alt_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/alt
     enabled: true

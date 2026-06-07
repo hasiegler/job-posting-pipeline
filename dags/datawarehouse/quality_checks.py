@@ -48,6 +48,7 @@ SALARY_MIN_PLAUSIBLE = 1000         # plausible annual floor
 SALARY_MAX_PLAUSIBLE = 10_000_000   # plausible annual ceiling
 RECENT_POSTING_DAYS = 4
 MAX_COMPANY_LINES = 15              # cap per-company anomalies in the message
+NULL_RATE_TOP_N = 3                 # top-N companies shown per tripping null-rate field
 
 # Fields that should essentially never be null/empty.  `location` treats the
 # Greenhouse "Unknown" default as missing; `departments` treats an empty array
@@ -80,12 +81,27 @@ def _check_salary_sanity(cur) -> list[str]:
     n = cur.fetchone()["n"]
     if not n:
         return []
+    # Per-company breakdown, descending by count, capped at 10 rows.
     cur.execute(
-        f"SELECT job_id FROM jobs WHERE {_SALARY_BAD_SQL} ORDER BY job_id LIMIT 5",
+        f"""
+        SELECT c.company_name, COUNT(*) AS cnt
+        FROM jobs j
+        JOIN companies c ON c.company_id = j.company_id
+        WHERE {_SALARY_BAD_SQL}
+        GROUP BY c.company_name
+        ORDER BY cnt DESC
+        LIMIT 10
+        """,
         params,
     )
-    examples = [r["job_id"] for r in cur.fetchall()]
-    return [f"Salary sanity: {n} implausible row(s) (e.g. job_ids {examples})"]
+    rows = cur.fetchall()
+    lines = [f"Salary sanity: {n} implausible row(s) by company:"]
+    for r in rows:
+        lines.append(f"  {r['company_name']}: {r['cnt']}")
+    shown = sum(r["cnt"] for r in rows)
+    if shown < n:
+        lines.append(f"  … +{n - shown} more")
+    return ["\n".join(lines)]
 
 
 def _check_duplicates(cur) -> list[str]:
@@ -93,9 +109,10 @@ def _check_duplicates(cur) -> list[str]:
     # guard against that constraint being dropped — normally always 0.
     cur.execute(
         """
-        SELECT company_id, source_job_id, COUNT(*) AS c
-        FROM jobs
-        GROUP BY company_id, source_job_id
+        SELECT c.company_name, j.source_job_id, COUNT(*) AS cnt
+        FROM jobs j
+        JOIN companies c ON c.company_id = j.company_id
+        GROUP BY c.company_name, j.source_job_id
         HAVING COUNT(*) > 1
         LIMIT 10
         """
@@ -103,21 +120,22 @@ def _check_duplicates(cur) -> list[str]:
     dups = cur.fetchall()
     if not dups:
         return []
-    sample = [(d["company_id"], d["source_job_id"]) for d in dups[:3]]
-    return [f"Duplicate (company_id, source_job_id): {len(dups)}+ group(s) e.g. {sample}"]
+    sample = [f"{d['company_name']} / {d['source_job_id']}" for d in dups[:3]]
+    return [f"Duplicate (company, source_job_id): {len(dups)}+ group(s) e.g. {sample}"]
 
 
 def _check_null_rates(cur) -> list[str]:
+    # Step 1: pipeline-wide totals.
     cur.execute(
         """
         SELECT
           COUNT(*) AS total,
-          COUNT(*) FILTER (WHERE title IS NULL OR title = '')                       AS title,
+          COUNT(*) FILTER (WHERE title IS NULL OR title = '')                              AS title,
           COUNT(*) FILTER (WHERE location IS NULL OR location = '' OR location = 'Unknown') AS location,
-          COUNT(*) FILTER (WHERE source_job_id IS NULL OR source_job_id = '')       AS source_job_id,
-          COUNT(*) FILTER (WHERE source_url IS NULL OR source_url = '')             AS source_url,
-          COUNT(*) FILTER (WHERE description_text IS NULL OR description_text = '')  AS description_text,
-          COUNT(*) FILTER (WHERE departments IS NULL OR cardinality(departments) = 0) AS departments
+          COUNT(*) FILTER (WHERE source_job_id IS NULL OR source_job_id = '')              AS source_job_id,
+          COUNT(*) FILTER (WHERE source_url IS NULL OR source_url = '')                    AS source_url,
+          COUNT(*) FILTER (WHERE description_text IS NULL OR description_text = '')        AS description_text,
+          COUNT(*) FILTER (WHERE departments IS NULL OR cardinality(departments) = 0)      AS departments
         FROM jobs
         WHERE is_active = TRUE
         """
@@ -126,11 +144,40 @@ def _check_null_rates(cur) -> list[str]:
     total = row["total"] or 0
     if total == 0:
         return []
+
+    tripping = {f: row[f] for f in NEVER_NULL_FIELDS if row[f] / total > NULL_RATE_THRESHOLD}
+    if not tripping:
+        return []
+
+    # Step 2: per-company breakdown (one query, all fields).  Only run when
+    # something trips — this is the slow path.
+    cur.execute(
+        """
+        SELECT
+          c.company_name,
+          COUNT(*) FILTER (WHERE j.title IS NULL OR j.title = '')                              AS title,
+          COUNT(*) FILTER (WHERE j.location IS NULL OR j.location = '' OR j.location = 'Unknown') AS location,
+          COUNT(*) FILTER (WHERE j.source_job_id IS NULL OR j.source_job_id = '')              AS source_job_id,
+          COUNT(*) FILTER (WHERE j.source_url IS NULL OR j.source_url = '')                    AS source_url,
+          COUNT(*) FILTER (WHERE j.description_text IS NULL OR j.description_text = '')        AS description_text,
+          COUNT(*) FILTER (WHERE j.departments IS NULL OR cardinality(j.departments) = 0)      AS departments
+        FROM jobs j
+        JOIN companies c ON c.company_id = j.company_id
+        WHERE j.is_active = TRUE
+        GROUP BY c.company_name
+        """
+    )
+    company_rows = cur.fetchall()
+
     out = []
-    for field in NEVER_NULL_FIELDS:
-        rate = row[field] / total
-        if rate > NULL_RATE_THRESHOLD:
-            out.append(f"Null-rate {field}: {rate * 100:.1f}% ({row[field]}/{total})")
+    for field, n in tripping.items():
+        rate = n / total
+        top = sorted(
+            [(r["company_name"], r[field]) for r in company_rows if r[field] > 0],
+            key=lambda x: x[1], reverse=True,
+        )[:NULL_RATE_TOP_N]
+        top_str = "    " + ", ".join(f"{name} ({cnt})" for name, cnt in top)
+        out.append(f"Null-rate {field}: {rate * 100:.1f}% ({n}/{total})\n{top_str}")
     return out
 
 
@@ -272,14 +319,24 @@ def _build_message(run_id, pipeline_warnings: list[str], company_anomalies: list
         return f"[QC PASS] {run_label}: all quality checks passed."
 
     lines = [f"[QC WARNINGS] {run_label}:"]
+
     if pipeline_warnings:
-        lines.append("Pipeline-wide:")
-        lines.extend(f"  - {w}" for w in pipeline_warnings)
+        lines.append("\nPipeline-wide:")
+        for w in pipeline_warnings:
+            # Warnings may be multi-line (e.g. salary sanity breakdown).
+            # First line gets the "- " bullet; continuation lines are indented.
+            first, *rest = w.split("\n")
+            lines.append(f"- {first}")
+            lines.extend(rest)  # already indented by the check function
+
     if company_anomalies:
         shown = company_anomalies[:MAX_COMPANY_LINES]
         extra = len(company_anomalies) - len(shown)
-        suffix = f" (+{extra} more)" if extra > 0 else ""
-        lines.append("Per-company anomalies: " + "; ".join(shown) + suffix)
+        lines.append(f"\nPer-company anomalies ({len(company_anomalies)}):")
+        lines.extend(f"- {a}" for a in shown)
+        if extra:
+            lines.append(f"  (+{extra} more)")
+
     return "\n".join(lines)
 
 
