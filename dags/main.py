@@ -3,6 +3,7 @@ import os
 from airflow import DAG
 from datetime import datetime, timedelta, timezone
 
+from alerting import alert_on_failure
 from api.scrape_jobs import (
     load_companies,
     scrape_all_companies,
@@ -18,6 +19,7 @@ from datawarehouse.dwh import (
     refresh_analytics,
     finalize_run_metrics,
 )
+from datawarehouse.quality_checks import run_quality_checks
 COMPANIES_FILE = "companies.yaml"
 
 
@@ -35,6 +37,9 @@ default_args = {
     "start_date": datetime(2026, 1, 1, tzinfo=timezone.utc),
     "email_on_failure": False,
     "email_on_retry": False,
+    # Fire a Telegram alert on ANY task failure in this DAG. The callback is
+    # itself wrapped so it can never raise / fail the run.
+    "on_failure_callback": alert_on_failure,
     #"retries": 1,
     #"retry_delay": timedelta(minutes=5),
 }
@@ -102,9 +107,16 @@ with DAG(
         cleanup_summary=cleanup,
     )
 
+    # Step 9: Final warn-only data-quality checks. Reads the freshly-loaded
+    # jobs + company_run_metrics/pipeline_runs (written by finalize_metrics)
+    # and sends ONE Telegram summary — warnings if anything tripped, otherwise
+    # a clean-run confirmation. Wrapped internally so it can never fail the DAG.
+    qc = run_quality_checks()
+
     # Dependencies
     sync >> all_companies
     staging >> jobs >> extraction >> history
     history >> cleanup
     history >> analytics
     [cleanup, analytics] >> finalize_metrics
+    finalize_metrics >> qc

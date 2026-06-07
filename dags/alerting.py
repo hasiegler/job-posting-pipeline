@@ -48,3 +48,27 @@ def send_alert(message: str) -> None:
             "send_alert: failed to deliver alert (%s: %s)",
             e.__class__.__name__, e,
         )
+
+
+def alert_on_failure(context) -> None:
+    """Airflow ``on_failure_callback``: fire a Telegram alert on any task failure.
+
+    Pulls ``dag_id``, ``task_id`` and the raised exception out of the Airflow
+    task context and routes them through ``send_alert``.  Fully wrapped so the
+    callback itself can never raise — a raising failure-callback would just
+    spam the scheduler logs without delivering anything useful.
+    """
+    try:
+        ti = context.get("task_instance") or context.get("ti")
+        dag = context.get("dag")
+        dag_id = getattr(ti, "dag_id", None) or getattr(dag, "dag_id", "unknown")
+        task_id = getattr(ti, "task_id", "unknown")
+        exc = context.get("exception")
+        send_alert(
+            f"[PIPELINE FAILURE] dag={dag_id} task={task_id} — {exc}"
+        )
+    except Exception as e:  # noqa: BLE001 — a callback must never raise
+        logger.warning(
+            "alert_on_failure: swallowed error (%s: %s)",
+            e.__class__.__name__, e,
+        )

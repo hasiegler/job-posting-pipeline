@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
 import requests
 import yaml
 
@@ -91,33 +90,109 @@ def scrape_greenhouse_jobs(company: dict) -> dict:
 
     print(f"  Found {len(raw_jobs)} jobs (meta.total={meta_total}).")
 
-    jobs = []
-    for raw in raw_jobs:
-        title = (raw.get("title") or "").strip()
-        if not title:
-            continue
-
-        location = raw.get("location", {}).get("name", "Unknown")
-        departments = [d["name"] for d in raw.get("departments", []) if "name" in d]
-        offices = [o["name"] for o in raw.get("offices", []) if "name" in o]
-
-        jobs.append(
-            {
-                "id": raw.get("id"),
-                "title": title,
-                "url": raw.get("absolute_url"),
-                "location": location,
-                "departments": departments,
-                "offices": offices,
-                "content_html": raw.get("content"),
-                "content_text": BeautifulSoup(raw.get("content", ""), "html.parser").get_text(separator="\n", strip=True),
-                "language": raw.get("language"),
-                "first_published": raw.get("first_published"),
-                "updated_at": raw.get("updated_at"),
-            }
-        )
+    # Store raw API objects exactly as received.  Only filter out jobs with no
+    # title — those are unpublished drafts the API occasionally leaks and are
+    # useless for any downstream consumer.  All other fields (absolute_url,
+    # location object, departments/offices objects, metadata, content HTML,
+    # internal_job_id, requisition_id, data_compliance, etc.) are preserved
+    # verbatim so normalize_greenhouse can work from the pristine source.
+    jobs = [raw for raw in raw_jobs if (raw.get("title") or "").strip()]
 
     return {"company_name": company["name"], "jobs": jobs, "meta_total": meta_total}
+
+
+# Per-scraper required field maps.  Maps logical jobs-table column name
+# (used in alert text) to the raw scrape-dict key for that ATS.
+#
+# Greenhouse jobs stored in S3 are now RAW API objects, so field names differ
+# from Ashby's pre-shaped dicts:
+#   - source_url  : raw has "absolute_url", Ashby has "url"
+#   - description : raw has "content" (HTML), Ashby has "content_text" (plain)
+#   - location    : raw has a nested object {"name": ...}; handled separately
+#
+# `departments` is deliberately absent from both maps — some boards
+# legitimately never populate it.  departments quality is surfaced warn-only
+# by the final QC task instead.
+_REQUIRED_FIELDS_GREENHOUSE = {
+    "source_job_id":  "id",
+    "source_url":     "absolute_url",
+    "title":          "title",
+    # location checked separately (nested object — see check_completeness)
+    "description_text": "content",
+}
+
+_REQUIRED_FIELDS_ASHBY = {
+    "source_job_id":  "id",
+    "source_url":     "url",
+    "title":          "title",
+    "location":       "location",
+    "description_text": "content_text",
+}
+
+_REQUIRED_FIELDS_BY_SCRAPER: dict[str, dict[str, str]] = {
+    "greenhouse": _REQUIRED_FIELDS_GREENHOUSE,
+    "ashby":      _REQUIRED_FIELDS_ASHBY,
+}
+
+
+def _is_missing(value) -> bool:
+    """True if a scraped field is null or blank (empty/whitespace-only string)."""
+    if value is None:
+        return True
+    if isinstance(value, str) and not value.strip():
+        return True
+    return False
+
+
+def check_completeness(company_name: str, jobs: list[dict], scraper_type: str = "ashby") -> None:
+    """Blocking per-company completeness guard.
+
+    Runs after a company's jobs are scraped but BEFORE the S3 write / staging
+    insert.  If ANY job is missing a required field this alerts and raises
+    ``RuntimeError`` so the surrounding `scrape_all_companies` handler converts
+    it into the SAME "transient" sentinel the Ashby/Greenhouse guards use: no
+    S3 write, no staging insert, existing jobs untouched, board not
+    auto-disabled, and the run still succeeds.
+
+    The required field map is per-scraper because Greenhouse jobs are now raw
+    API objects (different key names than Ashby's pre-shaped dicts).  Location
+    for Greenhouse is a nested object; we check location.name specifically.
+
+    The fields salary / remote_policy / skills / language / offices /
+    departments are intentionally NOT required — they're null by design on many
+    postings.
+    """
+    if not jobs:
+        return
+
+    required = _REQUIRED_FIELDS_BY_SCRAPER.get(scraper_type, _REQUIRED_FIELDS_ASHBY)
+    is_greenhouse = scraper_type == "greenhouse"
+
+    missing_counts: dict[str, int] = {}
+    for job in jobs:
+        for field, raw_key in required.items():
+            if _is_missing(job.get(raw_key)):
+                missing_counts[field] = missing_counts.get(field, 0) + 1
+
+        # Greenhouse location is a nested object {"name": ...}.  Check the
+        # name value directly; a missing or blank name is treated as missing.
+        if is_greenhouse:
+            loc_name = (job.get("location") or {}).get("name")
+            if _is_missing(loc_name):
+                missing_counts["location"] = missing_counts.get("location", 0) + 1
+
+    if missing_counts:
+        detail = ", ".join(
+            f"{field} ({n})" for field, n in sorted(missing_counts.items())
+        )
+        send_alert(
+            f"[COMPLETENESS BLOCK] {company_name}: skipping this run — "
+            f"of {len(jobs)} scraped jobs, missing required field(s): {detail}. "
+            f"Likely a source schema change."
+        )
+        raise RuntimeError(
+            f"{company_name}: completeness guard tripped — missing {detail}."
+        )
 
 
 def _sentinel_result(company: dict, error_type: str, error: str) -> dict:
@@ -221,6 +296,11 @@ def scrape_all_companies(company: dict) -> dict:
             return _sentinel_result(
                 company, "transient", f"unknown scraper_type '{scraper_type}'"
             )
+
+        # Blocking completeness guard: raises RuntimeError (→ transient
+        # sentinel below) if any scraped job is missing a required field, so a
+        # silent source schema change can't load incomplete rows.
+        check_completeness(result["company_name"], result["jobs"], scraper_type=scraper_type)
 
         s3_path = _write_result_to_s3(result)
         return {

@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime
 
+from bs4 import BeautifulSoup
 from psycopg2.extras import execute_values, Json
 
 from extraction import EXTRACTION_VERSION
@@ -545,25 +546,73 @@ def _parse_timestamp(value) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
+# ---------------------------------------------------------------------------
+# Greenhouse "Location Type" metadata → canonical remote_policy string.
+#
+# The Greenhouse API includes a `metadata` array on each job object.  One
+# entry typically has `{"name": "Location Type", "value": "..."}`.  The
+# values Greenhouse emits are mapped to the same canonical strings that
+# extract_remote_policy produces ("Remote", "Hybrid", "On-Site") so
+# API-derived and text-derived values are always consistent.
+# ---------------------------------------------------------------------------
+_GH_LOCATION_TYPE_MAP: dict[str, str] = {
+    "remote":     "Remote",
+    "hybrid":     "Hybrid",
+    "on-site":    "On-Site",
+    "on site":    "On-Site",
+    "onsite":     "On-Site",
+    "in-office":  "On-Site",
+    "in office":  "On-Site",
+}
+
+
+def _greenhouse_location_type(metadata) -> str | None:
+    """Return a canonical remote_policy from the Greenhouse metadata array, or None."""
+    for entry in (metadata or []):
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("name") or "").strip().lower() == "location type":
+            val = (entry.get("value") or "").strip()
+            return _GH_LOCATION_TYPE_MAP.get(val.lower())
+    return None
+
+
 def normalize_greenhouse(raw_data: dict) -> dict:
-    """Normalize a Greenhouse raw_data JSONB object to the jobs table schema."""
+    """Normalize a raw Greenhouse API job object to the jobs table schema.
+
+    raw_data is the verbatim JSON object from body["jobs"] as stored in
+    staging_jobs.raw_data.  Field names are the Greenhouse API names
+    (absolute_url, content, location object, etc.) — NOT the pre-reshaped
+    names the old scraper used (url, content_html/text, flat location string).
+    """
+    loc_obj = raw_data.get("location") or {}
+    location = loc_obj.get("name") if isinstance(loc_obj, dict) else loc_obj
+
+    departments = [d["name"] for d in raw_data.get("departments", []) if "name" in d]
+    offices = [o["name"] for o in raw_data.get("offices", []) if "name" in o]
+
+    content_html = raw_data.get("content")
+    content_text = BeautifulSoup(
+        content_html or "", "html.parser"
+    ).get_text(separator="\n", strip=True)
+
     return {
         "source_job_id": str(raw_data.get("id", "")),
-        "source_url": raw_data.get("url"),
+        "source_url": raw_data.get("absolute_url"),
         "title": raw_data.get("title"),
-        "location": raw_data.get("location"),
-        "departments": raw_data.get("departments", []),
-        "offices": raw_data.get("offices", []),
+        "location": location,
+        "departments": departments,
+        "offices": offices,
         "language": raw_data.get("language"),
-        "description_text": raw_data.get("content_text"),
-        "description_html": raw_data.get("content_html"),
+        "description_text": content_text or None,
+        "description_html": content_html,
         "first_published_at": _parse_timestamp(raw_data.get("first_published")),
         "skills": None,
         "salary_min": None,
         "salary_max": None,
         "salary_currency": None,
         "salary_period": None,
-        "remote_policy": None,
+        "remote_policy": _greenhouse_location_type(raw_data.get("metadata")),
         "experience_level": None,
         "education_required": None,
         "benefits": None,
@@ -1027,23 +1076,25 @@ def extract_fields_from_jobs(conn, cur) -> dict:
 
             company_metrics[company_id]["extraction_attempted"] += 1
 
-            # Ashby exposes salary and workplaceType directly on its public
-            # API and those values are populated at staging→jobs normalization
-            # time.  Running the description-text extractors unconditionally
-            # would overwrite them (via COALESCE below), so for Ashby we only
-            # fall back to the description extractors when the API didn't
-            # supply a value.  Not every Ashby posting includes a `compensation`
-            # block (e.g. many Notion postings) — for those the JD text is
-            # the only source.
+            # Ashby and Greenhouse both surface remote_policy directly from
+            # their APIs at normalization time (Ashby via workplaceType, Greenhouse
+            # via the metadata "Location Type" entry).  Only fall back to the
+            # description-text extractor when the API didn't supply a value, so
+            # API-sourced values are never silently overwritten.
+            # Salary: only Ashby exposes it via API; always run the extractor for
+            # Greenhouse (and any other ATS) since they never provide salary.
             if scraper_type == "ashby":
                 salary = extract_salary(desc) if row["salary_min"] is None else None
+            else:
+                salary = extract_salary(desc)
+
+            if scraper_type in ("ashby", "greenhouse"):
                 remote_policy = (
                     extract_remote_policy(desc, loc)
                     if row["remote_policy"] is None
                     else None
                 )
             else:
-                salary = extract_salary(desc)
                 remote_policy = extract_remote_policy(desc, loc)
             skills = extract_skills(
                 " ".join(part for part in [title, desc] if part), skill_matchers
@@ -1177,12 +1228,16 @@ def insert_staging_jobs(conn, cur, data: dict) -> int:
         conn.commit()
         return 0
 
+    # Greenhouse jobs are now raw API objects; source_url lives under
+    # "absolute_url".  Ashby jobs are still pre-shaped; source_url is "url".
+    url_key = "absolute_url" if scraper_type == "greenhouse" else "url"
+
     execute_values(cur, """
         INSERT INTO staging_jobs
             (company_id, scraper_type, source_job_id, source_url, raw_data, scraped_at)
         VALUES %s
     """, [
-        (company_id, scraper_type, str(job["id"]), job.get("url"),
+        (company_id, scraper_type, str(job["id"]), job.get(url_key),
          Json(job), scraped_at)
         for job in jobs
     ])
