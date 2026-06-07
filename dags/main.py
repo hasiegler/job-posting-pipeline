@@ -111,7 +111,7 @@ with DAG(
     # jobs + company_run_metrics/pipeline_runs (written by finalize_metrics)
     # and sends ONE Telegram summary — warnings if anything tripped, otherwise
     # a clean-run confirmation. Wrapped internally so it can never fail the DAG.
-    qc = run_quality_checks()
+    qc = run_quality_checks(company_results=company_results)
 
     # Dependencies
     sync >> all_companies

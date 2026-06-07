@@ -271,6 +271,22 @@ def _check_run_regressions(cur, dag_id: str, run_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Per-company regression checks (baseline from company_run_metrics)
 # ---------------------------------------------------------------------------
+def _check_scrape_failures(company_results: list[dict] | None) -> list[str]:
+    """Flag enabled companies whose scrape map task returned a sentinel.
+
+    Only enabled companies are scraped (see ``load_companies``), so every
+    entry with ``skipped=True`` is a real failure for an active board.
+    """
+    anomalies: list[str] = []
+    for result in company_results or []:
+        if not result or not result.get("skipped"):
+            continue
+        name = result.get("company_name", "unknown")
+        error = result.get("error") or "unknown error"
+        anomalies.append(f"{name} scrape failed ({error})")
+    return anomalies
+
+
 def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
     cur.execute(
         """
@@ -282,22 +298,22 @@ def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
     current = {r["company_id"]: (r["scraped_jobs"] or 0) for r in cur.fetchall()}
 
     # Trailing per-company baseline: last N successful (scraped_jobs > 0) runs,
-    # excluding the current run.  Any company appearing here had >0 in its most
-    # recent successful run, which is exactly the "had jobs before" condition —
-    # persistently-zero companies never appear, so they are never flagged.
+    # excluding the current run.  Restrict to enabled companies — disabled
+    # boards are intentionally not scraped and must not false-positive.
     cur.execute(
         """
-        SELECT company_id, company_name, AVG(scraped_jobs) AS avg_scraped, COUNT(*) AS n
+        SELECT t.company_id, t.company_name, AVG(t.scraped_jobs) AS avg_scraped, COUNT(*) AS n
         FROM (
-            SELECT company_id, company_name, scraped_jobs,
+            SELECT crm.company_id, crm.company_name, crm.scraped_jobs,
                    ROW_NUMBER() OVER (
-                       PARTITION BY company_id ORDER BY run_started_at DESC
+                       PARTITION BY crm.company_id ORDER BY crm.run_started_at DESC
                    ) AS rn
-            FROM company_run_metrics
-            WHERE dag_id = %s AND scraped_jobs > 0 AND run_id <> %s
+            FROM company_run_metrics crm
+            JOIN companies c ON c.company_id = crm.company_id AND c.enabled = TRUE
+            WHERE crm.dag_id = %s AND crm.scraped_jobs > 0 AND crm.run_id <> %s
         ) t
-        WHERE rn <= %s
-        GROUP BY company_id, company_name
+        WHERE t.rn <= %s
+        GROUP BY t.company_id, t.company_name
         """,
         (dag_id, run_id, BASELINE_RUNS),
     )
@@ -305,12 +321,16 @@ def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
 
     anomalies: list[str] = []
     for b in baselines:
+        company_id = b["company_id"]
+        # No row for this run → company was not scraped (disabled or skipped
+        # upstream).  Do not treat a missing row as zero jobs.
+        if company_id not in current:
+            continue
+
         name = b["company_name"]
         avg = float(b["avg_scraped"])
-        cur_scraped = current.get(b["company_id"], 0)
+        cur_scraped = current[company_id]
 
-        # Zero-that-had-jobs (also catches companies skipped this run, which
-        # simply have no current row → treated as 0).
         if cur_scraped == 0:
             anomalies.append(f"{name} 0 jobs (avg {avg:.0f})")
             continue
@@ -424,7 +444,7 @@ def _build_message(run_id, pipeline_warnings: list[str], company_anomalies: list
 
 
 @task
-def run_quality_checks() -> dict:
+def run_quality_checks(company_results: list[dict] | None = None) -> dict:
     """Final warn-only QC pass.  Sends exactly one Telegram summary per run."""
     try:
         context = get_current_context()
@@ -434,7 +454,7 @@ def run_quality_checks() -> dict:
         run_id = getattr(dag_run, "run_id", None)
 
         pipeline_warnings: list[str] = []
-        company_anomalies: list[str] = []
+        company_anomalies: list[str] = _check_scrape_failures(company_results)
 
         # Each check runs on its own short-lived connection so a failure in one
         # (e.g. an aborted transaction) can never poison the others.
