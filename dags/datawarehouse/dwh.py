@@ -239,6 +239,31 @@ def finalize_run_metrics(
             }
         )
 
+    # Compute true coverage from the jobs table — % of active jobs with each
+    # field populated.  These are stored in pipeline_runs so the QC task can
+    # regress against a real time series instead of the extractor hit counters.
+    cur.execute(
+        """
+        SELECT
+            ROUND(
+                COUNT(*) FILTER (WHERE salary_min IS NOT NULL)
+                * 100.0 / NULLIF(COUNT(*), 0), 2
+            ) AS salary_coverage_pct,
+            ROUND(
+                COUNT(*) FILTER (WHERE remote_policy IS NOT NULL)
+                * 100.0 / NULLIF(COUNT(*), 0), 2
+            ) AS remote_coverage_pct,
+            ROUND(
+                COUNT(*) FILTER (
+                    WHERE skills IS NOT NULL AND cardinality(skills) > 0
+                ) * 100.0 / NULLIF(COUNT(*), 0), 2
+            ) AS skills_coverage_pct
+        FROM jobs
+        WHERE is_active = TRUE
+        """
+    )
+    cov = cur.fetchone() or {}
+
     run_metrics = {
         "dag_id": dag_id,
         "run_id": run_id,
@@ -256,6 +281,9 @@ def finalize_run_metrics(
         "salary_found": int(extraction_summary.get("salary_found", 0)),
         "remote_policy_found": int(extraction_summary.get("remote_policy_found", 0)),
         "skills_found": int(extraction_summary.get("skills_found", 0)),
+        "salary_coverage_pct": cov.get("salary_coverage_pct"),
+        "remote_coverage_pct": cov.get("remote_coverage_pct"),
+        "skills_coverage_pct": cov.get("skills_coverage_pct"),
     }
 
     upsert_run_monitoring(conn, cur, run_metrics, company_rows_for_insert)

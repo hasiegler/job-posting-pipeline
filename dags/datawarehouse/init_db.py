@@ -212,6 +212,9 @@ def create_monitoring_tables():
             salary_found         INTEGER NOT NULL DEFAULT 0,
             remote_policy_found  INTEGER NOT NULL DEFAULT 0,
             skills_found         INTEGER NOT NULL DEFAULT 0,
+            salary_coverage_pct  NUMERIC,
+            remote_coverage_pct  NUMERIC,
+            skills_coverage_pct  NUMERIC,
             created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (dag_id, run_id)

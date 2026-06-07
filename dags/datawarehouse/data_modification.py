@@ -86,6 +86,15 @@ def ensure_monitoring_tables(conn, cur) -> None:
         ON pipeline_runs (run_started_at DESC);
         """
     )
+    # Coverage columns added after initial release — safe to run on existing tables.
+    for col in (
+        "salary_coverage_pct NUMERIC",
+        "remote_coverage_pct NUMERIC",
+        "skills_coverage_pct NUMERIC",
+    ):
+        cur.execute(
+            f"ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS {col};"
+        )
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS company_run_metrics (
@@ -245,9 +254,12 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
             dag_id, run_id, run_started_at, run_finished_at, status,
             total_companies, total_scraped, total_staged, total_new, total_updated,
             total_unchanged, total_closed, total_extracted, salary_found,
-            remote_policy_found, skills_found, updated_at
+            remote_policy_found, skills_found,
+            salary_coverage_pct, remote_coverage_pct, skills_coverage_pct,
+            updated_at
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, NOW()
         )
         ON CONFLICT (dag_id, run_id) DO UPDATE SET
             run_started_at = EXCLUDED.run_started_at,
@@ -264,6 +276,9 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
             salary_found = EXCLUDED.salary_found,
             remote_policy_found = EXCLUDED.remote_policy_found,
             skills_found = EXCLUDED.skills_found,
+            salary_coverage_pct = EXCLUDED.salary_coverage_pct,
+            remote_coverage_pct = EXCLUDED.remote_coverage_pct,
+            skills_coverage_pct = EXCLUDED.skills_coverage_pct,
             updated_at = NOW();
         """,
         (
@@ -283,6 +298,9 @@ def upsert_run_monitoring(conn, cur, run_metrics: dict, company_metrics: list[di
             run_metrics["salary_found"],
             run_metrics["remote_policy_found"],
             run_metrics["skills_found"],
+            run_metrics.get("salary_coverage_pct"),
+            run_metrics.get("remote_coverage_pct"),
+            run_metrics.get("skills_coverage_pct"),
         ),
     )
 

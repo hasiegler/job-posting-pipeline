@@ -206,7 +206,8 @@ def _check_run_regressions(cur, dag_id: str, run_id: str) -> list[str]:
 
     cur.execute(
         """
-        SELECT total_scraped, salary_found, remote_policy_found, skills_found
+        SELECT total_scraped,
+               salary_coverage_pct, remote_coverage_pct, skills_coverage_pct
         FROM pipeline_runs WHERE dag_id = %s AND run_id = %s
         """,
         (dag_id, run_id),
@@ -217,7 +218,8 @@ def _check_run_regressions(cur, dag_id: str, run_id: str) -> list[str]:
 
     cur.execute(
         """
-        SELECT total_scraped, salary_found, remote_policy_found, skills_found
+        SELECT total_scraped,
+               salary_coverage_pct, remote_coverage_pct, skills_coverage_pct
         FROM pipeline_runs
         WHERE dag_id = %s AND status = 'success'
           AND total_scraped > 0 AND run_id <> %s
@@ -227,10 +229,10 @@ def _check_run_regressions(cur, dag_id: str, run_id: str) -> list[str]:
         (dag_id, run_id, BASELINE_RUNS),
     )
     base = cur.fetchall()
-    if not base:  # 0 prior successful runs → skip regression
+    if not base:
         return out
 
-    # Count regression: this run's total scraped vs trailing average.
+    # Count regression: total scraped this run vs trailing average.
     avg_scraped = sum(r["total_scraped"] for r in base) / len(base)
     if cur_run["total_scraped"] < avg_scraped * COUNT_REGRESSION_FACTOR:
         drop = (1 - cur_run["total_scraped"] / avg_scraped) * 100
@@ -239,18 +241,29 @@ def _check_run_regressions(cur, dag_id: str, run_id: str) -> list[str]:
             f"{avg_scraped:.0f} over {len(base)} run(s) (-{drop:.0f}%)"
         )
 
-    # Fill-rate drops (found / scraped) vs trailing average.
+    # Coverage regressions: % of active jobs with field populated, vs trailing
+    # average.  Uses stored coverage_pct columns (computed from jobs table at
+    # finalize time) — not extractor hit counters, so Ashby API-sourced values
+    # and Greenhouse metadata-sourced values are all counted correctly.
+    # NULLs in prior runs (before the columns were added) are excluded from the
+    # baseline so the first post-migration run doesn't false-positive.
     for field, label in (
-        ("salary_found", "salary"),
-        ("remote_policy_found", "remote"),
-        ("skills_found", "skills"),
+        ("salary_coverage_pct", "salary"),
+        ("remote_coverage_pct", "remote"),
+        ("skills_coverage_pct", "skills"),
     ):
-        cur_rate = cur_run[field] / cur_run["total_scraped"]
-        base_rate = sum(r[field] / r["total_scraped"] for r in base) / len(base)
-        if base_rate > 0 and cur_rate < base_rate * FILL_RATE_DROP_FACTOR:
+        cur_pct = cur_run[field]
+        if cur_pct is None:
+            continue
+        base_vals = [r[field] for r in base if r[field] is not None]
+        if not base_vals:
+            continue
+        base_avg = sum(base_vals) / len(base_vals)
+        if base_avg > 0 and float(cur_pct) < float(base_avg) * FILL_RATE_DROP_FACTOR:
+            drop = (1 - float(cur_pct) / float(base_avg)) * 100
             out.append(
-                f"Fill-rate drop {label}: {cur_rate * 100:.0f}% vs avg "
-                f"{base_rate * 100:.0f}%"
+                f"Coverage drop {label}: {float(cur_pct):.1f}% vs avg "
+                f"{float(base_avg):.1f}% (-{drop:.0f}%)"
             )
     return out
 
@@ -311,6 +324,76 @@ def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Health checks (stale jobs, enabled-but-empty companies)
+# ---------------------------------------------------------------------------
+def _check_stale_active_jobs(cur) -> list[str]:
+    """Flag active jobs whose last_seen is >4 days old.
+
+    Normally every scrape touches last_seen for all of a company's active jobs.
+    A stale last_seen means that company's scrapes have been silently returning
+    sentinel results (no staging insert) for 4+ days, so its jobs were never
+    closed by the pipeline's close-jobs logic either.
+    """
+    cur.execute(
+        """
+        SELECT
+            c.company_name,
+            COUNT(*) AS cnt,
+            EXTRACT(DAY FROM NOW() - MAX(j.last_seen))::INT AS days_since
+        FROM jobs j
+        JOIN companies c ON c.company_id = j.company_id
+        WHERE j.is_active = TRUE
+          AND j.last_seen < NOW() - INTERVAL '4 days'
+        GROUP BY c.company_name
+        ORDER BY cnt DESC
+        LIMIT 10
+        """
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    total = sum(r["cnt"] for r in rows)
+    lines = [f"Stale active jobs: {total}+ active jobs not seen in >4 days:"]
+    for r in rows:
+        lines.append(
+            f"    {r['company_name']}: {r['cnt']} jobs ({r['days_since']}d ago)"
+        )
+    return ["\n".join(lines)]
+
+
+def _check_enabled_zero_jobs(cur) -> list[str]:
+    """Flag enabled companies that have 0 active jobs but have had jobs before.
+
+    Skips brand-new companies (those with no historical jobs at all) so a
+    freshly added company that hasn't been scraped yet doesn't false-positive.
+    """
+    cur.execute(
+        """
+        SELECT c.company_name
+        FROM companies c
+        WHERE c.enabled = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM jobs j
+              WHERE j.company_id = c.company_id AND j.is_active = TRUE
+          )
+          AND EXISTS (
+              SELECT 1 FROM jobs j
+              WHERE j.company_id = c.company_id
+          )
+        ORDER BY c.company_name
+        LIMIT 20
+        """
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    names = [r["company_name"] for r in rows]
+    lines = [f"Enabled companies with 0 active jobs ({len(names)}):"]
+    lines.extend(f"    {n}" for n in names)
+    return ["\n".join(lines)]
+
+
+# ---------------------------------------------------------------------------
 # Message assembly
 # ---------------------------------------------------------------------------
 def _build_message(run_id, pipeline_warnings: list[str], company_anomalies: list[str]) -> str:
@@ -366,6 +449,8 @@ def run_quality_checks() -> dict:
         pipeline_warnings += _safe("duplicates", _check_duplicates)
         pipeline_warnings += _safe("null_rates", _check_null_rates)
         pipeline_warnings += _safe("recent_postings", _check_recent_postings)
+        pipeline_warnings += _safe("stale_active_jobs", _check_stale_active_jobs)
+        pipeline_warnings += _safe("enabled_zero_jobs", _check_enabled_zero_jobs)
 
         if run_id:
             try:
