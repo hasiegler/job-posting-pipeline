@@ -834,3 +834,233 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/alt
     enabled: true
+
+  - name: komodohealth_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/komodohealth
+    enabled: true
+
+  - name: recursionpharmaceuticals_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/recursionpharmaceuticals
+    enabled: true
+
+  - name: billcom_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/billcom
+    enabled: true
+
+  - name: alloy_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/alloy
+    enabled: true
+
+  - name: goatgroup_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/goatgroup
+    enabled: true
+
+  - name: poshmark_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/poshmark
+    enabled: true
+
+  - name: renttherunway_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/renttherunway
+    enabled: true
+
+  - name: hellofresh_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/hellofresh
+    enabled: true
+
+  - name: misfitsmarket_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/misfitsmarket
+    enabled: true
+
+  - name: thrivemarket_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/thrivemarket
+    enabled: true
+
+  - name: tailscale_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/tailscale
+    enabled: true
+
+  - name: sigmacomputing_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/sigmacomputing
+    enabled: true
+
+  - name: calendly_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/calendly
+    enabled: true
+
+  - name: braze_greenhouse
+    scraper_type: greenhouse
+    url: https://boards.greenhouse.io/braze
+    enabled: true
+
+  - name: abridge_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/abridge
+    enabled: true
+
+  - name: ambiencehealthcare_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/ambiencehealthcare
+    enabled: true
+
+  - name: nabla_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/nabla
+    enabled: true
+
+  - name: openevidence_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/openevidence
+    enabled: true
+
+  - name: numeric_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/numeric
+    enabled: true
+
+  - name: rogo_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/rogo
+    enabled: true
+
+  - name: rilla_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/rilla
+    enabled: true
+
+  - name: attention_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/attention
+    enabled: true
+
+  - name: baseten_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/baseten
+    enabled: true
+
+  - name: lancedb_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/lancedb
+    enabled: true
+
+  - name: nomic_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/nomic
+    enabled: true
+
+  - name: unstructured_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/unstructured
+    enabled: true
+
+  - name: reducto_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/reducto
+    enabled: true
+
+  - name: physicalintelligence_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/physicalintelligence
+    enabled: true
+
+  - name: saronic_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/saronic
+    enabled: true
+
+  - name: twelve_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/twelve
+    enabled: true
+
+  - name: aurorasolar_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/aurorasolar
+    enabled: true
+
+  - name: column_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/column
+    enabled: true
+
+  - name: meow_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/meow
+    enabled: true
+
+  - name: slope_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/slope
+    enabled: true
+
+  - name: tremendous_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/tremendous
+    enabled: true
+
+  - name: astra_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/astra
+    enabled: true
+
+  - name: paddle_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/paddle
+    enabled: true
+
+  - name: depot_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/depot
+    enabled: true
+
+  - name: doppler_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/doppler
+    enabled: true
+
+  - name: infisical_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/infisical
+    enabled: true
+
+  - name: sanity_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/sanity
+    enabled: true
+
+  - name: jobber_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/jobber
+    enabled: true
+
+  - name: curated_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/curated
+    enabled: true
+
+  - name: kojo_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/kojo
+    enabled: true
+
+  - name: outschool_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/outschool
+    enabled: true
+
+  - name: multiverse_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/multiverse
+    enabled: true
