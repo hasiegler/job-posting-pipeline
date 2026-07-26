@@ -1,0 +1,47 @@
+name: "jobpulse"
+version: "1.0.0"
+config-version: 2
+
+# Which profile (connection) in profiles.yml this project uses.
+profile: "jobpulse"
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Project-level variables. These mirror the boilerplate-skill suppression
+# thresholds from data_modification.py (BOILERPLATE_SKILL_MIN_MENTIONS /
+# BOILERPLATE_SKILL_MIN_PERCENTAGE). Overridable at runtime with
+# `dbt run --vars '{boilerplate_skill_min_mentions: 25}'`.
+vars:
+  boilerplate_skill_min_mentions: 20
+  boilerplate_skill_min_percentage: 90.0
+
+  # QC test thresholds (mirror the constants that used to live in
+  # dags/datawarehouse/quality_checks.py).
+  null_rate_threshold: 0.01           # warn if >1% of active jobs are null/empty on a never-null field
+  salary_min_plausible: 1000          # yearly-salary plausibility floor
+  salary_max_plausible: 10000000      # yearly-salary plausibility ceiling
+  min_description_length: 50          # active jobs with shorter descriptions look like parse failures
+  active_jobs_regression_factor: 0.6  # warn if today's total active jobs < 60% of the trailing average
+  baseline_snapshots: 7               # trailing snapshot window for the active-jobs regression
+
+# All data tests default to warn severity: they surface problems without
+# failing the DAG, matching the warn-only philosophy of the Python QC task.
+data_tests:
+  +severity: warn
+
+# Defaults for every model in this project. The marts we migrate from
+# refresh_company_analytics will live under models/marts/ and are built as
+# real tables (later switched to incremental for snapshot history).
+models:
+  jobpulse:
+    marts:
+      +materialized: table

@@ -17,6 +17,7 @@ from datawarehouse.dwh import (
     extract_fields,
     clean_staging,
     refresh_analytics,
+    run_dbt_tests,
     finalize_run_metrics,
 )
 from datawarehouse.quality_checks import run_quality_checks
@@ -95,10 +96,17 @@ with DAG(
     # Step 6: Purge processed staging rows
     cleanup = clean_staging()
 
-    # Step 7: Snapshot precomputed company analytics
+    # Step 7: Rebuild the company analytics marts with dbt (company_stats /
+    # company_skills / company_departments). dbt runs against the `prod`
+    # target, writing to the same public tables the app already reads.
     analytics = refresh_analytics()
 
-    # Step 8: Persist per-run monitoring metrics
+    # Step 8: Run dbt tests (warn-only). Produces the data-validity findings
+    # (duplicates, salary sanity, null rates, lifecycle invariants, …) that
+    # used to be Python QC checks. Returns warning lines for the QC summary.
+    dbt_tests = run_dbt_tests()
+
+    # Step 9: Persist per-run monitoring metrics
     finalize_metrics = finalize_run_metrics(
         sync_summary=sync,
         staging_summaries=staging,
@@ -107,16 +115,20 @@ with DAG(
         cleanup_summary=cleanup,
     )
 
-    # Step 9: Final warn-only data-quality checks. Reads the freshly-loaded
-    # jobs + company_run_metrics/pipeline_runs (written by finalize_metrics)
-    # and sends ONE Telegram summary — warnings if anything tripped, otherwise
-    # a clean-run confirmation. Wrapped internally so it can never fail the DAG.
-    qc = run_quality_checks(company_results=company_results)
+    # Step 10: Final warn-only quality checks. Reads the freshly-loaded jobs +
+    # company_run_metrics/pipeline_runs (written by finalize_metrics), folds in
+    # the dbt test warnings, and sends ONE Telegram summary — warnings if
+    # anything tripped, otherwise a clean-run confirmation. Wrapped internally
+    # so it can never fail the DAG.
+    qc = run_quality_checks(
+        company_results=company_results,
+        dbt_test_warnings=dbt_tests,
+    )
 
     # Dependencies
     sync >> all_companies
     staging >> jobs >> extraction >> history
     history >> cleanup
-    history >> analytics
+    history >> analytics >> dbt_tests
     [cleanup, analytics] >> finalize_metrics
-    finalize_metrics >> qc
+    [finalize_metrics, dbt_tests] >> qc

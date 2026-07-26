@@ -11,6 +11,10 @@ x-airflow-common: &airflow-common
     - ./include:/opt/airflow/include
     - ./tests:/opt/airflow/tests
     - ./companies.yaml:/opt/airflow/companies.yaml
+    # dbt project (models, tests, profiles.yml). dbt itself is installed in an
+    # isolated venv baked into the image (see dockerfile). dbt writes its
+    # target/ and logs/ to /tmp at runtime, so this mount is only read.
+    - ./dbt:/opt/airflow/dbt:ro
   depends_on:
     postgres:
       condition: service_healthy

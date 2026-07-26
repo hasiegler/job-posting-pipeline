@@ -28,7 +28,6 @@ from datawarehouse.data_modification import (
     purge_processed_staging,
     snapshot_changed_jobs,
     upsert_run_monitoring,
-    refresh_company_analytics,
 )
 
 
@@ -96,10 +95,34 @@ def clean_staging() -> dict:
 
 @task
 def refresh_analytics() -> dict:
-    """Snapshot precomputed company analytics from the current jobs table."""
-    summary = run_with_db(refresh_company_analytics)
-    print(f"  Company analytics refreshed: {summary}")
+    """Rebuild the company analytics marts with dbt.
+
+    Replaces the old refresh_company_analytics() Python: the company_stats /
+    company_skills / company_departments tables are now dbt incremental models
+    (dbt/models/marts/). dbt runs against the `prod` target, writing to the
+    same `public` tables the pipeline and analysis scripts already read.
+    Fails the task if the build breaks.
+    """
+    from datawarehouse.dbt_runner import build_marts
+
+    summary = build_marts()
+    print(f"  Company analytics rebuilt via dbt: {summary}")
     return summary
+
+
+@task
+def run_dbt_tests() -> list[str]:
+    """Run `dbt test` (warn-only) and return warning lines for the QC summary.
+
+    Runs after refresh_analytics so the marts exist. Never raises — any finding
+    (or even a dbt failure) comes back as a warning string that
+    run_quality_checks folds into the single Telegram summary.
+    """
+    from datawarehouse.dbt_runner import collect_test_warnings
+
+    warnings = collect_test_warnings()
+    print(f"  dbt test warnings: {len(warnings)}")
+    return warnings
 
 
 @task

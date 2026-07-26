@@ -1,0 +1,37 @@
+# Connection config for the "jobpulse" dbt project.
+#
+# Credentials are NOT stored here — they are read at runtime from the same
+# environment variables the Python pipeline already uses (see .env /
+# dags/datawarehouse/data_utils.py). This file is therefore safe to commit.
+#
+# dbt reads its inputs FROM the `public` schema (via sources: jobs, companies,
+# company_run_metrics) and writes the marts back into `public` as well, so the
+# analytics tables live right beside the raw tables and are the SINGLE source
+# of truth for the pipeline and the tools/analysis scripts.
+#
+#   * prod (default) -> schema `public`: the real tables. This is the default,
+#     and the target Airflow uses (dags/datawarehouse/dbt_runner.py runs
+#     `--target prod`). A plain `dbt run` also writes here.
+#   * dev            -> schema `dbt_dev`: an OPTIONAL personal sandbox for
+#     safely testing model changes. Nothing writes here unless you explicitly
+#     pass `--target dev`; the schema is created on demand and can be dropped
+#     anytime. Use it when you don't want an experiment touching public.
+jobpulse:
+  target: prod
+  outputs:
+    prod: &supabase
+      type: postgres
+      host: "{{ env_var('SUPABASE_HOST') }}"
+      port: "{{ env_var('SUPABASE_PORT', '5432') | as_number }}"
+      user: "{{ env_var('SUPABASE_USER') }}"
+      password: "{{ env_var('SUPABASE_PASSWORD') }}"
+      dbname: "{{ env_var('SUPABASE_DB', 'postgres') }}"
+      schema: public
+      sslmode: require
+      # Supabase's session pooler has a hard client limit; keep concurrency low
+      # (mirrors the retry/backoff rationale in data_utils.get_conn_cursor).
+      threads: 4
+      keepalives_idle: 30
+    dev:
+      <<: *supabase
+      schema: dbt_dev

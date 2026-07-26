@@ -1,13 +1,25 @@
 """
-Warn-only post-load data-quality checks — the final DAG step.
+Warn-only post-load quality checks — the final DAG step.
 
 Runs after the jobs table, ``company_run_metrics`` and ``pipeline_runs`` have
-been loaded for the current run.  Executes a battery of absolute, regression
-and soft checks, folds every finding into a SINGLE Telegram summary via
-``send_alert``, and always sends exactly one message per successful run:
+been loaded for the current run.  Folds every finding into a SINGLE Telegram
+summary via ``send_alert`` and always sends exactly one message per successful
+run:
 
   * a "[QC WARNINGS]" summary when ≥1 check tripped, or
   * a "[QC PASS]" confirmation when everything is clean.
+
+SCOPE — this module owns only the checks that need run context or a trailing
+baseline time series:
+  * scrape failures (from the current run's scrape results),
+  * run-level and per-company count/coverage regressions, and
+  * operational / soft health checks (recent postings, stale active jobs,
+    enabled-but-empty companies).
+
+Absolute data-validity checks (duplicates, salary sanity, never-null fields,
+value domains, timestamp/lifecycle invariants, extraction coverage and
+analytics-snapshot completeness) now live as dbt tests under dbt/tests/ and
+dbt/models/*.yml and run via ``dbt test``.
 
 This task NEVER blocks and NEVER crashes the DAG: each individual check is
 wrapped (a failing check is logged and skipped) and the whole task is wrapped,
@@ -38,147 +50,13 @@ from datawarehouse.data_utils import run_with_db
 logger = logging.getLogger(__name__)
 
 # -- Thresholds -------------------------------------------------------------
-NULL_RATE_THRESHOLD = 0.01          # >1% null/empty on a never-null field
 FILL_RATE_DROP_FACTOR = 0.5         # alert if current < 50% of trailing avg
 COUNT_REGRESSION_FACTOR = 0.6       # alert if current < 60% of avg (>40% drop)
 PER_COMPANY_DROP_FACTOR = 0.5       # alert if company < 50% of its avg (>50% drop)
 MIN_BASELINE_FOR_PCT = 10           # small-sample guard (mirrors Ashby check)
 BASELINE_RUNS = 7                   # trailing window
-SALARY_MIN_PLAUSIBLE = 1000         # plausible annual floor
-SALARY_MAX_PLAUSIBLE = 10_000_000   # plausible annual ceiling
 RECENT_POSTING_DAYS = 4
 MAX_COMPANY_LINES = 15              # cap per-company anomalies in the message
-NULL_RATE_TOP_N = 3                 # top-N companies shown per tripping null-rate field
-
-# Fields that should essentially never be null/empty.  `location` treats the
-# Greenhouse "Unknown" default as missing; `departments` treats an empty array
-# as missing (this is the warn-only surfacing of the departments check).
-NEVER_NULL_FIELDS = (
-    "title", "location", "source_job_id",
-    "source_url", "description_text", "departments",
-)
-
-# Salary-sanity predicate.  The plausible-range bounds apply ONLY to yearly
-# salaries — an hourly rate (e.g. $50/hr) is legitimately < 1000.
-_SALARY_BAD_SQL = """
-    is_active = TRUE AND (
-          (salary_min IS NOT NULL AND salary_min <= 0)
-       OR (salary_min IS NOT NULL AND salary_max IS NOT NULL AND salary_max < salary_min)
-       OR (salary_period = 'yearly' AND salary_min IS NOT NULL
-           AND (salary_min < %(lo)s OR salary_min > %(hi)s))
-       OR (salary_period = 'yearly' AND salary_max IS NOT NULL
-           AND (salary_max < %(lo)s OR salary_max > %(hi)s))
-    )
-"""
-
-
-# ---------------------------------------------------------------------------
-# Absolute checks
-# ---------------------------------------------------------------------------
-def _check_salary_sanity(cur) -> list[str]:
-    params = {"lo": SALARY_MIN_PLAUSIBLE, "hi": SALARY_MAX_PLAUSIBLE}
-    cur.execute(f"SELECT COUNT(*) AS n FROM jobs WHERE {_SALARY_BAD_SQL}", params)
-    n = cur.fetchone()["n"]
-    if not n:
-        return []
-    # Per-company breakdown, descending by count, capped at 10 rows.
-    cur.execute(
-        f"""
-        SELECT c.company_name, COUNT(*) AS cnt
-        FROM jobs j
-        JOIN companies c ON c.company_id = j.company_id
-        WHERE {_SALARY_BAD_SQL}
-        GROUP BY c.company_name
-        ORDER BY cnt DESC
-        LIMIT 10
-        """,
-        params,
-    )
-    rows = cur.fetchall()
-    lines = [f"Salary sanity: {n} implausible row(s) by company:"]
-    for r in rows:
-        lines.append(f"  {r['company_name']}: {r['cnt']}")
-    shown = sum(r["cnt"] for r in rows)
-    if shown < n:
-        lines.append(f"  … +{n - shown} more")
-    return ["\n".join(lines)]
-
-
-def _check_duplicates(cur) -> list[str]:
-    # NOTE: jobs has UNIQUE(company_id, source_job_id), so this is effectively a
-    # guard against that constraint being dropped — normally always 0.
-    cur.execute(
-        """
-        SELECT c.company_name, j.source_job_id, COUNT(*) AS cnt
-        FROM jobs j
-        JOIN companies c ON c.company_id = j.company_id
-        GROUP BY c.company_name, j.source_job_id
-        HAVING COUNT(*) > 1
-        LIMIT 10
-        """
-    )
-    dups = cur.fetchall()
-    if not dups:
-        return []
-    sample = [f"{d['company_name']} / {d['source_job_id']}" for d in dups[:3]]
-    return [f"Duplicate (company, source_job_id): {len(dups)}+ group(s) e.g. {sample}"]
-
-
-def _check_null_rates(cur) -> list[str]:
-    # Step 1: pipeline-wide totals.
-    cur.execute(
-        """
-        SELECT
-          COUNT(*) AS total,
-          COUNT(*) FILTER (WHERE title IS NULL OR title = '')                              AS title,
-          COUNT(*) FILTER (WHERE location IS NULL OR location = '' OR location = 'Unknown') AS location,
-          COUNT(*) FILTER (WHERE source_job_id IS NULL OR source_job_id = '')              AS source_job_id,
-          COUNT(*) FILTER (WHERE source_url IS NULL OR source_url = '')                    AS source_url,
-          COUNT(*) FILTER (WHERE description_text IS NULL OR description_text = '')        AS description_text,
-          COUNT(*) FILTER (WHERE departments IS NULL OR cardinality(departments) = 0)      AS departments
-        FROM jobs
-        WHERE is_active = TRUE
-        """
-    )
-    row = cur.fetchone()
-    total = row["total"] or 0
-    if total == 0:
-        return []
-
-    tripping = {f: row[f] for f in NEVER_NULL_FIELDS if row[f] / total > NULL_RATE_THRESHOLD}
-    if not tripping:
-        return []
-
-    # Step 2: per-company breakdown (one query, all fields).  Only run when
-    # something trips — this is the slow path.
-    cur.execute(
-        """
-        SELECT
-          c.company_name,
-          COUNT(*) FILTER (WHERE j.title IS NULL OR j.title = '')                              AS title,
-          COUNT(*) FILTER (WHERE j.location IS NULL OR j.location = '' OR j.location = 'Unknown') AS location,
-          COUNT(*) FILTER (WHERE j.source_job_id IS NULL OR j.source_job_id = '')              AS source_job_id,
-          COUNT(*) FILTER (WHERE j.source_url IS NULL OR j.source_url = '')                    AS source_url,
-          COUNT(*) FILTER (WHERE j.description_text IS NULL OR j.description_text = '')        AS description_text,
-          COUNT(*) FILTER (WHERE j.departments IS NULL OR cardinality(j.departments) = 0)      AS departments
-        FROM jobs j
-        JOIN companies c ON c.company_id = j.company_id
-        WHERE j.is_active = TRUE
-        GROUP BY c.company_name
-        """
-    )
-    company_rows = cur.fetchall()
-
-    out = []
-    for field, n in tripping.items():
-        rate = n / total
-        top = sorted(
-            [(r["company_name"], r[field]) for r in company_rows if r[field] > 0],
-            key=lambda x: x[1], reverse=True,
-        )[:NULL_RATE_TOP_N]
-        top_str = "    " + ", ".join(f"{name} ({cnt})" for name, cnt in top)
-        out.append(f"Null-rate {field}: {rate * 100:.1f}% ({n}/{total})\n{top_str}")
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +210,12 @@ def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
         cur_scraped = current[company_id]
 
         if cur_scraped == 0:
-            anomalies.append(f"{name} 0 jobs (avg {avg:.0f})")
+            # Only flag a zero-job run when the baseline is substantial. For a
+            # company with a small/noisy baseline (avg < MIN_BASELINE_FOR_PCT) a
+            # 0 is plausibly legitimate (a small board with nothing open), so we
+            # don't treat it as an anomaly.
+            if avg >= MIN_BASELINE_FOR_PCT:
+                anomalies.append(f"{name} 0 jobs (avg {avg:.0f})")
             continue
 
         # Count regression — skip tiny baselines (noise at low counts).
@@ -444,8 +327,17 @@ def _build_message(run_id, pipeline_warnings: list[str], company_anomalies: list
 
 
 @task
-def run_quality_checks(company_results: list[dict] | None = None) -> dict:
-    """Final warn-only QC pass.  Sends exactly one Telegram summary per run."""
+def run_quality_checks(
+    company_results: list[dict] | None = None,
+    dbt_test_warnings: list[str] | None = None,
+) -> dict:
+    """Final warn-only QC pass.  Sends exactly one Telegram summary per run.
+
+    ``dbt_test_warnings`` is the output of the ``run_dbt_tests`` task — the
+    warn-level findings from ``dbt test`` (duplicates, salary sanity, null
+    rates, lifecycle invariants, …). They are folded in here so every QC
+    finding, Python- or dbt-sourced, lands in the same single Telegram message.
+    """
     try:
         context = get_current_context()
         dag = context.get("dag")
@@ -453,7 +345,9 @@ def run_quality_checks(company_results: list[dict] | None = None) -> dict:
         dag_id = getattr(dag, "dag_id", "company_json_scraper")
         run_id = getattr(dag_run, "run_id", None)
 
-        pipeline_warnings: list[str] = []
+        # dbt test findings come in pre-formatted (see dbt_runner); seed the
+        # pipeline warnings with them so they share the one summary.
+        pipeline_warnings: list[str] = list(dbt_test_warnings or [])
         company_anomalies: list[str] = _check_scrape_failures(company_results)
 
         # Each check runs on its own short-lived connection so a failure in one
@@ -465,9 +359,8 @@ def run_quality_checks(company_results: list[dict] | None = None) -> dict:
                 logger.warning("QC check %s failed: %s", label, e)
                 return []
 
-        pipeline_warnings += _safe("salary_sanity", _check_salary_sanity)
-        pipeline_warnings += _safe("duplicates", _check_duplicates)
-        pipeline_warnings += _safe("null_rates", _check_null_rates)
+        # NOTE: duplicates, salary sanity and never-null-field checks moved to
+        # dbt tests (run via `dbt test`); see this module's docstring.
         pipeline_warnings += _safe("recent_postings", _check_recent_postings)
         pipeline_warnings += _safe("stale_active_jobs", _check_stale_active_jobs)
         pipeline_warnings += _safe("enabled_zero_jobs", _check_enabled_zero_jobs)

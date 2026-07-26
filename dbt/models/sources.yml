@@ -1,0 +1,72 @@
+version: 2
+
+# Sources = tables that ALREADY EXIST and are owned/populated by the Python
+# pipeline (dags/). dbt only READS from these; it never creates or writes them.
+# Referencing them as {{ source('jobpulse', '<table>') }} is what draws the
+# boundary "everything downstream of here is dbt's responsibility".
+sources:
+  - name: jobpulse
+    description: "Core tables produced by the Airflow pipeline, living in the public schema."
+    schema: public
+    tables:
+      - name: jobs
+        description: >
+          Normalized, enriched job postings — the core fact table. One row per
+          (company_id, source_job_id). Built by process_staging_to_jobs and the
+          Python field extractors. This is dbt's primary input.
+        columns:
+          - name: job_id
+            description: "Surrogate primary key."
+          - name: company_id
+            description: "FK to companies."
+          - name: is_active
+            description: "True while the posting is still live on the source board."
+          - name: first_published_at
+            description: "When the posting first appeared (drives posted_7d/30d)."
+          - name: date_closed
+            description: "When the posting was detected closed (drives closed_7d/30d)."
+          - name: remote_policy
+            description: "One of 'Remote' / 'Hybrid' / 'On-Site' (or NULL)."
+            data_tests:
+              # NULL is allowed (accepted_values ignores NULLs); a stray value
+              # means a normalizer regression.
+              - accepted_values:
+                  arguments:
+                    values: ["Remote", "Hybrid", "On-Site"]
+          - name: salary_min
+            description: "Parsed minimum salary."
+          - name: salary_max
+            description: "Parsed maximum salary."
+          - name: salary_currency
+            description: "Salary currency code, e.g. 'USD'."
+          - name: salary_period
+            description: "Salary period, e.g. 'yearly'."
+            data_tests:
+              - accepted_values:
+                  arguments:
+                    values: ["yearly", "hourly"]
+          - name: skills
+            description: "TEXT[] of extracted skills."
+          - name: departments
+            description: "TEXT[] of departments the posting belongs to."
+
+      - name: companies
+        description: "Company registry synced from companies.yaml."
+        columns:
+          - name: company_id
+            description: "Surrogate primary key."
+          - name: company_name
+            description: "Unique company name."
+          - name: enabled
+            description: "Whether the company is currently scraped/active."
+
+      - name: company_run_metrics
+        description: >
+          Per-company, per-run pipeline metrics. Used only to derive each
+          company's first run date (first_run CTE in company_stats), which
+          gates the 7d/30d net-change columns until enough history exists.
+        columns:
+          - name: company_id
+            description: "FK to companies."
+          - name: run_started_at
+            description: "Start timestamp of the DAG run this metric row belongs to."
