@@ -59,6 +59,14 @@ select
     count(*) filter (where j.is_active and j.remote_policy = 'Remote') as remote_count,
     count(*) filter (where j.is_active and j.remote_policy = 'Hybrid') as hybrid_count,
     count(*) filter (where j.is_active and j.remote_policy = 'On-Site') as onsite_count,
+    -- How many active jobs actually carried a usable USD/yearly salary — i.e.
+    -- the sample size behind the avg/median figures below. Lets the UI show
+    -- "median $X–$Y (based on N jobs)" instead of implying every active job.
+    count(*) filter (
+        where j.is_active
+          and (j.salary_min is not null or j.salary_max is not null)
+          and j.salary_currency = 'USD' and j.salary_period = 'yearly'
+    ) as salary_sample_size,
     avg(j.salary_min) filter (
         where j.is_active and j.salary_min is not null
           and j.salary_currency = 'USD' and j.salary_period = 'yearly'

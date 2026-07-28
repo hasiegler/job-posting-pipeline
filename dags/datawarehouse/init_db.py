@@ -140,6 +140,7 @@ def create_company_analytics_tables():
             avg_salary_max    NUMERIC,
             median_salary_min NUMERIC,
             median_salary_max NUMERIC,
+            salary_sample_size INTEGER,
             PRIMARY KEY (company_id, snapshot_date)
         );
     """)
@@ -159,6 +160,7 @@ def create_company_analytics_tables():
             avg_salary_max    NUMERIC,
             median_salary_min NUMERIC,
             median_salary_max NUMERIC,
+            salary_sample_size INTEGER,
             PRIMARY KEY (company_id, snapshot_date, skill_name)
         );
     """)
@@ -178,6 +180,7 @@ def create_company_analytics_tables():
             avg_salary_max    NUMERIC,
             median_salary_min NUMERIC,
             median_salary_max NUMERIC,
+            salary_sample_size INTEGER,
             PRIMARY KEY (company_id, snapshot_date, department_name)
         );
     """)

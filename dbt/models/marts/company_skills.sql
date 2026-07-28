@@ -30,6 +30,14 @@ select
     s.skill as skill_name,
     count(*) as mention_count,
     round(100.0 * count(*) / ac.total, 2) as percentage,
+    -- Of the jobs mentioning this skill, how many carried a usable USD/yearly
+    -- salary — the sample size behind the avg/median below. `mention_count` is
+    -- NOT that number, so the UI should show this next to the salary range.
+    count(*) filter (
+        where (j.salary_min is not null or j.salary_max is not null)
+          and j.salary_currency = 'USD'
+          and j.salary_period = 'yearly'
+    ) as salary_sample_size,
     avg(j.salary_min) filter (
         where j.salary_min is not null
           and j.salary_currency = 'USD'
