@@ -39,6 +39,13 @@ _WORKPLACE_TYPE_MAP = {
     "OnSite": "On-Site",
 }
 
+# Completeness-guard threshold.  BOTH trip rules below only fire when a
+# company's baseline is at least this many jobs.  Small boards are noisy: a
+# baseline of a handful of jobs legitimately going to 0 (nothing currently
+# open) must NOT be treated as a bad scrape, so we never skip the run for them.
+# A board with a substantial baseline (e.g. 70) dropping to 0 still trips.
+MIN_BASELINE_FOR_GUARD = 10
+
 
 def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
     """Return ``scraped_jobs`` from this company's most recent
@@ -63,8 +70,8 @@ def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
     scrape (the board is live but currently has no postings) is also
     excluded by this filter.  That's an acceptable tradeoff because a
     zero-baseline company can't be meaningfully regression-checked anyway —
-    rule (a) needs ``baseline > 0`` and rule (b) needs ``baseline >= 10``,
-    so a 0-baseline never trips either rule even when included.
+    both trip rules require ``baseline >= MIN_BASELINE_FOR_GUARD``, so a small
+    or zero baseline never trips either rule even when included.
     """
     def _q(conn, cur):
         cur.execute(
@@ -176,13 +183,19 @@ def scrape_ashby_jobs(company: dict) -> dict:
     # Ashby's posting-api response has no meta.total equivalent, so we use a
     # regression heuristic instead: compare today's count to this company's
     # most recent successful scrape and trip on a hard zero-floor or a >50%
-    # drop.  Trip routes through the same RuntimeError → "transient" sentinel
-    # path the Greenhouse meta.total guard uses, so the board is skipped this
-    # run only — no S3 write, no staging insert, no auto-disable.
+    # drop.  Both rules are gated behind MIN_BASELINE_FOR_GUARD so small,
+    # noisy boards are never skipped for a legitimate 0.  Trip routes through
+    # the same RuntimeError → "transient" sentinel path the Greenhouse
+    # meta.total guard uses, so the board is skipped this run only — no S3
+    # write, no staging insert, no auto-disable.
     today_count = len(jobs)
     baseline = _get_baseline_scraped_jobs(company["name"])
 
-    if today_count == 0 and baseline is not None and baseline > 0:
+    if (
+        today_count == 0
+        and baseline is not None
+        and baseline >= MIN_BASELINE_FOR_GUARD
+    ):
         send_alert(
             f"[Ashby] {company['name']}: zero-floor trip — fetched 0 jobs "
             f"vs baseline={baseline}. Skipping this run."
@@ -193,7 +206,7 @@ def scrape_ashby_jobs(company: dict) -> dict:
         )
     if (
         baseline is not None
-        and baseline >= 10
+        and baseline >= MIN_BASELINE_FOR_GUARD
         and today_count < baseline * 0.5
     ):
         send_alert(
