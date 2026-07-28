@@ -13,437 +13,437 @@ companies:
   - name: airbnb_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/airbnb
-    enabled: false
+    enabled: true
 
   - name: doordash_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/doordashusa
-    enabled: false
+    enabled: true
 
   - name: gitlab_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/gitlab
-    enabled: false
+    enabled: true
 
   - name: stripe_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/stripe
-    enabled: false
+    enabled: true
 
   - name: figma_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/figma
-    enabled: false
+    enabled: true
 
   - name: databricks_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/databricks
-    enabled: false
+    enabled: true
 
   - name: datadog_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/datadog
-    enabled: false
+    enabled: true
 
   - name: cloudflare_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/cloudflare
-    enabled: false
+    enabled: true
 
   - name: discord_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/discord
-    enabled: false
+    enabled: true
 
   - name: reddit_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/reddit
-    enabled: false
+    enabled: true
 
   - name: duolingo_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/duolingo
-    enabled: false
+    enabled: true
 
   - name: lyft_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/lyft
-    enabled: false
+    enabled: true
 
   - name: squarespace_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/squarespace
-    enabled: false
+    enabled: true
 
   - name: asana_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/asana
-    enabled: false
+    enabled: true
 
   - name: robinhood_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/robinhood
-    enabled: false
+    enabled: true
 
   - name: scaleai_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/scaleai
-    enabled: false
+    enabled: true
 
   - name: c3ai_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/c3iot
-    enabled: false
+    enabled: true
 
   - name: vercel_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/vercel
-    enabled: false
+    enabled: true
 
   - name: airtable_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/airtable
-    enabled: false
+    enabled: true
 
   - name: instacart_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/instacart
-    enabled: false
+    enabled: true
 
   - name: cockroachlabs_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/cockroachlabs
-    enabled: false
+    enabled: true
 
   - name: twilio_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/twilio
-    enabled: false
+    enabled: true
 
   - name: pagerduty_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/pagerduty
-    enabled: false
+    enabled: true
 
   - name: rubrik_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/rubrik
-    enabled: false
+    enabled: true
 
   - name: gusto_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/gusto
-    enabled: false
+    enabled: true
 
   - name: brex_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/brex
-    enabled: false
+    enabled: true
 
   - name: coupang_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/coupang
-    enabled: false
+    enabled: true
 
   - name: okta_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/okta
-    enabled: false
+    enabled: true
 
   - name: metronome_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/metronome
-    enabled: false
+    enabled: true
 
   - name: pinterest_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/pinterest
-    enabled: false
+    enabled: true
 
   - name: dropbox_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/dropbox
-    enabled: false
+    enabled: true
 
   - name: twitch_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/twitch
-    enabled: false
+    enabled: true
 
   - name: hubspot_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/hubspot
-    enabled: false
+    enabled: true
 
   - name: mixpanel_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/mixpanel
-    enabled: false
+    enabled: true
 
   - name: coursera_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/coursera
-    enabled: false
+    enabled: true
 
   - name: elastic_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/elastic
-    enabled: false
+    enabled: true
 
   - name: mongodb_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/mongodb
-    enabled: false
+    enabled: true
 
   - name: affirm_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/affirm
-    enabled: false
+    enabled: true
 
   - name: roblox_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/roblox
-    enabled: false
+    enabled: true
 
   - name: spacex_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/spacex
-    enabled: false
+    enabled: true
 
   - name: anduril_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/andurilindustries
-    enabled: false
+    enabled: true
 
   - name: flexport_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/flexport
-    enabled: false
+    enabled: true
 
   - name: webflow_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/webflow
-    enabled: false
+    enabled: true
 
   - name: lattice_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/lattice
-    enabled: false
+    enabled: true
 
   - name: samsara_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/samsara
-    enabled: false
+    enabled: true
 
   - name: chime_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/chime
-    enabled: false
+    enabled: true
 
   - name: relativity_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/relativity
-    enabled: false
+    enabled: true
 
   - name: zipline_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/flyzipline
-    enabled: false
+    enabled: true
 
   - name: newrelic_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/newrelic
-    enabled: false
+    enabled: true
 
   - name: postman_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/postman
-    enabled: false
+    enabled: true
 
   - name: verkada_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/verkada
-    enabled: false
+    enabled: true
 
   - name: labelbox_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/labelbox
-    enabled: false
+    enabled: true
 
   - name: figment_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/figment
-    enabled: false
+    enabled: true
 
   - name: amplitude_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/amplitude
-    enabled: false
+    enabled: true
 
   - name: launchdarkly_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/launchdarkly
-    enabled: false
+    enabled: true
 
   - name: netlify_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/netlify
-    enabled: false
+    enabled: true
 
   - name: circleci_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/circleci
-    enabled: false
+    enabled: true
 
   - name: yugabyte_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/yugabyte
-    enabled: false
+    enabled: true
 
   - name: fivetran_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/fivetran
-    enabled: false
+    enabled: true
 
   - name: assemblyai_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/assemblyai
-    enabled: false
+    enabled: true
 
   - name: coreweave_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/coreweave
-    enabled: false
+    enabled: true
 
   - name: doximity_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/doximity
-    enabled: false
+    enabled: true
 
   - name: sofi_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/sofi
-    enabled: false
+    enabled: true
 
   - name: marqeta_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/marqeta
-    enabled: false
+    enabled: true
 
   - name: toast_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/toast
-    enabled: false
+    enabled: true
 
   - name: gemini_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/gemini
-    enabled: false
+    enabled: true
 
   - name: carta_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/carta
-    enabled: false
+    enabled: true
 
   - name: faire_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/faire
-    enabled: false
+    enabled: true
 
   - name: remotecom_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/remotecom
-    enabled: false
+    enabled: true
 
   - name: scopely_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/scopely
-    enabled: false
+    enabled: true
 
   - name: wolt_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/wolt
-    enabled: false
+    enabled: true
 
   - name: trivago_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/trivago
-    enabled: false
+    enabled: true
 
   - name: nubank_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/nubank
-    enabled: false
+    enabled: true
 
   - name: clickhouse_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/clickhouse
-    enabled: false
+    enabled: true
 
   - name: checkr_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/checkr
-    enabled: false
+    enabled: true
 
   - name: mercury_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/mercury
-    enabled: false
+    enabled: true
 
   - name: block_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/block
-    enabled: false
+    enabled: true
 
   - name: betterment_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/betterment
-    enabled: false
+    enabled: true
 
   - name: clever_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/clever
-    enabled: false
+    enabled: true
 
   - name: klaviyo_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/klaviyo
-    enabled: false
+    enabled: true
 
   - name: chainguard_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/chainguard
-    enabled: false
+    enabled: true
 
   - name: temporaltechnologies_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/temporaltechnologies
-    enabled: false
+    enabled: true
 
   - name: oscar_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/oscar
-    enabled: false
+    enabled: true
 
   - name: peloton_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/peloton
-    enabled: false
+    enabled: true
 
   - name: classpass_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/classpass
-    enabled: false
+    enabled: true
 
   - name: nuro_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/nuro
-    enabled: false
+    enabled: true
 
   - name: flexe_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/flexe
-    enabled: false
+    enabled: true
 
   - name: opendoor_greenhouse
     scraper_type: greenhouse
@@ -453,32 +453,32 @@ companies:
   - name: urbancompass_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/urbancompass
-    enabled: false
+    enabled: true
 
   - name: godaddy_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/godaddy
-    enabled: false
+    enabled: true
 
   - name: pagaya_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/pagaya
-    enabled: false
+    enabled: true
 
   - name: imply_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/imply
-    enabled: false
+    enabled: true
 
   - name: grafanalabs_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/grafanalabs
-    enabled: false
+    enabled: true
 
   - name: tebra_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/tebra
-    enabled: false
+    enabled: true
 
   - name: growtherapy_greenhouse
     scraper_type: greenhouse
@@ -488,17 +488,17 @@ companies:
   - name: stockx_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/stockx
-    enabled: false
+    enabled: true
 
   - name: glossier_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/glossier
-    enabled: false
+    enabled: true
 
   - name: zocdoc_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/zocdoc
-    enabled: false
+    enabled: true
 
   - name: sweetgreen_greenhouse
     scraper_type: greenhouse
@@ -513,42 +513,42 @@ companies:
   - name: getyourguide_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/getyourguide
-    enabled: false
+    enabled: true
 
   - name: intercom_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/intercom
-    enabled: false
+    enabled: true
 
   - name: ramp_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/Ramp
-    enabled: false
+    enabled: true
 
   - name: perplexity_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/perplexity
-    enabled: false
+    enabled: true
 
   - name: harvey_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/harvey
-    enabled: false
+    enabled: true
 
   - name: elevenlabs_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/ElevenLabs
-    enabled: false
+    enabled: true
 
   - name: runway_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/Runway
-    enabled: false
+    enabled: true
 
   - name: character_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/character
-    enabled: false
+    enabled: true
 
   - name: mistral_ashby
     scraper_type: ashby
@@ -558,137 +558,137 @@ companies:
   - name: cohere_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/cohere
-    enabled: false
+    enabled: true
 
   - name: writer_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/writer
-    enabled: false
+    enabled: true
 
   - name: pika_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/pika
-    enabled: false
+    enabled: true
 
   - name: cursor_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/Cursor
-    enabled: false
+    enabled: true
 
   - name: anyscale_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/anyscale
-    enabled: false
+    enabled: true
 
   - name: linear_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/linear
-    enabled: false
+    enabled: true
 
   - name: supabase_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/Supabase
-    enabled: false
+    enabled: true
 
   - name: neon_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/neon
-    enabled: false
+    enabled: true
 
   - name: modal_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/modal
-    enabled: false
+    enabled: true
 
   - name: sentry_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/sentry
-    enabled: false
+    enabled: true
 
   - name: posthog_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/PostHog
-    enabled: false
+    enabled: true
 
   - name: workos_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/workos
-    enabled: false
+    enabled: true
 
   - name: stytch_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/stytch
-    enabled: false
+    enabled: true
 
   - name: clerk_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/clerk
-    enabled: false
+    enabled: true
 
   - name: railway_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/railway
-    enabled: false
+    enabled: true
 
   - name: plaid_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/Plaid
-    enabled: false
+    enabled: true
 
   - name: moderntreasury_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/ModernTreasury
-    enabled: false
+    enabled: true
 
   - name: vanta_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/vanta
-    enabled: false
+    enabled: true
 
   - name: drata_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/drata
-    enabled: false
+    enabled: true
 
   - name: notion_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/notion
-    enabled: false
+    enabled: true
 
   - name: clickup_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/clickup
-    enabled: false
+    enabled: true
 
   - name: openai_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/openai
-    enabled: false
+    enabled: true
 
   - name: pinecone_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/pinecone
-    enabled: false
+    enabled: true
 
   - name: weaviate_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/weaviate
-    enabled: false
+    enabled: true
 
   - name: trychroma_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/trychroma
-    enabled: false
+    enabled: true
 
   - name: langchain_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/langchain
-    enabled: false
+    enabled: true
 
   - name: llamaindex_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/llamaindex
-    enabled: false
+    enabled: true
 
   - name: suno_ashby
     scraper_type: ashby
@@ -698,27 +698,27 @@ companies:
   - name: krea_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/krea
-    enabled: false
+    enabled: true
 
   - name: synthesia_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/synthesia
-    enabled: false
+    enabled: true
 
   - name: tavus_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/tavus
-    enabled: false
+    enabled: true
 
   - name: sierra_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/sierra
-    enabled: false
+    enabled: true
 
   - name: decagon_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/decagon
-    enabled: false
+    enabled: true
 
   - name: mem_ashby
     scraper_type: ashby
@@ -728,339 +728,339 @@ companies:
   - name: granola_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/granola
-    enabled: false
+    enabled: true
 
   - name: zed_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/zed
-    enabled: false
+    enabled: true
 
   - name: replit_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/replit
-    enabled: false
+    enabled: true
 
   - name: coder_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/coder
-    enabled: false
+    enabled: true
 
   - name: render_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/render
-    enabled: false
+    enabled: true
 
   - name: inngest_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/inngest
-    enabled: false
+    enabled: true
 
   - name: resend_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/resend
-    enabled: false
+    enabled: true
 
   - name: knock_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/knock
-    enabled: false
+    enabled: true
 
   - name: hightouch_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/hightouch
-    enabled: false
+    enabled: true
 
   - name: prefect_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/prefect
-    enabled: false
+    enabled: true
 
   - name: astronomer_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/astronomer
-    enabled: false
+    enabled: true
 
   - name: airbyte_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/airbyte
-    enabled: false
+    enabled: true
 
   - name: deel_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/deel
-    enabled: false
+    enabled: true
 
   - name: found_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/found
-    enabled: false
+    enabled: true
 
   - name: sardine_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/sardine
-    enabled: false
+    enabled: true
 
   - name: unit_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/unit
-    enabled: false
+    enabled: true
 
   - name: craftdocs_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/craftdocs
-    enabled: false
+    enabled: true
 
   - name: gamma_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/gamma
-    enabled: false
+    enabled: true
 
   - name: whoop_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/whoop
-    enabled: false
+    enabled: true
 
   - name: eightsleep_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/eightsleep
-    enabled: false
+    enabled: true
 
   - name: watershed_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/watershed
-    enabled: false
+    enabled: true
 
   - name: alt_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/alt
-    enabled: false
+    enabled: true
 
   - name: komodohealth_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/komodohealth
-    enabled: false
+    enabled: true
 
   - name: recursionpharmaceuticals_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/recursionpharmaceuticals
-    enabled: false
+    enabled: true
 
   - name: billcom_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/billcom
-    enabled: false
+    enabled: true
 
   - name: alloy_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/alloy
-    enabled: false
+    enabled: true
 
   - name: goatgroup_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/goatgroup
-    enabled: false
+    enabled: true
 
   - name: poshmark_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/poshmark
-    enabled: false
+    enabled: true
 
   - name: renttherunway_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/renttherunway
-    enabled: false
+    enabled: true
 
   - name: hellofresh_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/hellofresh
-    enabled: false
+    enabled: true
 
   - name: misfitsmarket_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/misfitsmarket
-    enabled: false
+    enabled: true
 
   - name: thrivemarket_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/thrivemarket
-    enabled: false
+    enabled: true
 
   - name: tailscale_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/tailscale
-    enabled: false
+    enabled: true
 
   - name: sigmacomputing_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/sigmacomputing
-    enabled: false
+    enabled: true
 
   - name: calendly_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/calendly
-    enabled: false
+    enabled: true
 
   - name: braze_greenhouse
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/braze
-    enabled: false
+    enabled: true
 
   - name: abridge_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/abridge
-    enabled: false
+    enabled: true
 
   - name: ambiencehealthcare_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/ambiencehealthcare
-    enabled: false
+    enabled: true
 
   - name: nabla_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/nabla
-    enabled: false
+    enabled: true
 
   - name: openevidence_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/openevidence
-    enabled: false
+    enabled: true
 
   - name: numeric_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/numeric
-    enabled: false
+    enabled: true
 
   - name: rogo_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/rogo
-    enabled: false
+    enabled: true
 
   - name: rilla_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/rilla
-    enabled: false
+    enabled: true
 
   - name: attention_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/attention
-    enabled: false
+    enabled: true
 
   - name: baseten_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/baseten
-    enabled: false
+    enabled: true
 
   - name: lancedb_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/lancedb
-    enabled: false
+    enabled: true
 
   - name: nomic_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/nomic
-    enabled: false
+    enabled: true
 
   - name: unstructured_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/unstructured
-    enabled: false
+    enabled: true
 
   - name: reducto_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/reducto
-    enabled: false
+    enabled: true
 
   - name: physicalintelligence_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/physicalintelligence
-    enabled: false
+    enabled: true
 
   - name: saronic_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/saronic
-    enabled: false
+    enabled: true
 
   - name: twelve_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/twelve
-    enabled: false
+    enabled: true
 
   - name: aurorasolar_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/aurorasolar
-    enabled: false
+    enabled: true
 
   - name: column_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/column
-    enabled: false
+    enabled: true
 
   - name: meow_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/meow
-    enabled: false
+    enabled: true
 
   - name: slope_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/slope
-    enabled: false
+    enabled: true
 
   - name: tremendous_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/tremendous
-    enabled: false
+    enabled: true
 
   - name: astra_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/astra
-    enabled: false
+    enabled: true
 
   - name: paddle_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/paddle
-    enabled: false
+    enabled: true
 
   - name: depot_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/depot
-    enabled: false
+    enabled: true
 
   - name: doppler_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/doppler
-    enabled: false
+    enabled: true
 
   - name: infisical_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/infisical
-    enabled: false
+    enabled: true
 
   - name: sanity_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/sanity
-    enabled: false
+    enabled: true
 
   - name: jobber_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/jobber
-    enabled: false
+    enabled: true
 
   - name: curated_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/curated
-    enabled: false
+    enabled: true
 
   - name: kojo_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/kojo
-    enabled: false
+    enabled: true
 
   - name: outschool_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/outschool
-    enabled: false
+    enabled: true
 
   - name: multiverse_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/multiverse
-    enabled: false
+    enabled: true
