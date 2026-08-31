@@ -4,11 +4,6 @@ companies:
     scraper_type: greenhouse
     url: https://boards.greenhouse.io/anthropic
     enabled: true
-  
-  - name: alt_greenhouse
-    scraper_type: greenhouse
-    url: https://boards.greenhouse.io/alt
-    enabled: true
 
   - name: airbnb_greenhouse
     scraper_type: greenhouse
@@ -1063,4 +1058,229 @@ companies:
   - name: multiverse_ashby
     scraper_type: ashby
     url: https://jobs.ashbyhq.com/multiverse
+    enabled: true
+
+  - name: benchling_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/benchling
+    enabled: true
+
+  - name: careerswift_ai_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/careerswift.ai
+    enabled: true
+
+  - name: mercor_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/mercor
+    enabled: true
+
+  - name: cognition_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/cognition
+    enabled: true
+
+  - name: factory_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/factory
+    enabled: true
+
+  - name: poolside_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/poolside
+    enabled: true
+
+  - name: fireworks_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/fireworks
+    enabled: true
+
+  - name: cerebras_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/cerebras
+    enabled: true
+
+  - name: encord_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/encord
+    enabled: true
+
+  - name: heirloomcarbon_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/heirloomcarbon
+    enabled: true
+
+  - name: oyster_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/oyster
+    enabled: true
+
+  - name: ashby_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/ashby
+    enabled: true
+
+  - name: mintlify_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/mintlify
+    enabled: true
+
+  - name: speakeasy_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/speakeasy
+    enabled: true
+
+  - name: graphite_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/graphite
+    enabled: true
+
+  - name: incident_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/incident
+    enabled: true
+
+  - name: axiom_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/axiom
+    enabled: true
+
+  - name: hex_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/hex
+    enabled: true
+
+  - name: omni_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/omni
+    enabled: true
+
+  - name: legora_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/legora
+    enabled: true
+
+  - name: insitro_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/insitro
+    enabled: true
+
+  - name: absci_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/absci
+    enabled: true
+
+  - name: headway_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/headway
+    enabled: true
+
+  - name: superpower_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/superpower
+    enabled: true
+
+  - name: neptune_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/neptune
+    enabled: true
+
+  - name: turbopuffer_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/turbopuffer
+    enabled: true
+
+  - name: roboflow_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/roboflow
+    enabled: true
+
+  - name: deepgram_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/deepgram
+    enabled: true
+
+  - name: lemlist_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/lemlist
+    enabled: true
+
+  - name: dovetail_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/dovetail
+    enabled: true
+
+  - name: sprig_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/sprig
+    enabled: true
+
+  - name: fullstory_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/fullstory
+    enabled: true
+
+  - name: amplitude_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/amplitude
+    enabled: true
+
+  - name: gainsight_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/gainsight
+    enabled: true
+
+  - name: plain_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/plain
+    enabled: true
+
+  - name: helpscout_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/helpscout
+    enabled: true
+
+  - name: gorgias_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/gorgias
+    enabled: true
+
+  - name: kustomer_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/kustomer
+    enabled: true
+
+  - name: iterable_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/iterable
+    enabled: true
+
+  - name: deepnote_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/deepnote
+    enabled: true
+
+  - name: formenergy_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/formenergy
+    enabled: true
+
+  - name: helion_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/helion
+    enabled: true
+
+  - name: persona_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/persona
+    enabled: true
+
+  - name: middesk_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/middesk
+    enabled: true
+
+  - name: skyflow_ashby
+    scraper_type: ashby
+    url: https://jobs.ashbyhq.com/skyflow
     enabled: true
