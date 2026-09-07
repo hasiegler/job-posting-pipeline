@@ -1,11 +1,36 @@
-venv/
+# Secrets — never commit. See .env.example for the required variable names.
+.env
+.env.*
+!.env.example
 
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 
+# Virtualenvs
+venv/
+.venv/
+
+# Airflow / pipeline runtime artifacts
+logs/
 output/
 
-logs/
+# dbt: compiled artifacts, run logs, and the machine-local user UUID
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
 
-.env
-
+# Local-only tooling output (see tools/README.md)
 tools/analysis/results/
+tools/validators/new_companies.yaml
+tools/validators/new_ashby_companies.yaml
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+.idea/
+.vscode/
