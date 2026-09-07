@@ -8,7 +8,6 @@ x-airflow-common: &airflow-common
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./output:/opt/airflow/output
-    - ./include:/opt/airflow/include
     - ./tests:/opt/airflow/tests
     - ./companies.yaml:/opt/airflow/companies.yaml
     # dbt project (models, tests, profiles.yml). dbt itself is installed in an
