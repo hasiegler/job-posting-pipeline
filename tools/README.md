@@ -1,7 +1,15 @@
-# tools/
+# tools/ — local-only helpers, **not** part of the pipeline
 
-Scripts run **locally** for research and maintenance. Nothing in this folder is
-deployed to production or bundled into the Docker image (see `.dockerignore`).
+> **Nothing in this folder is production code.** The Airflow DAG under `dags/`
+> is the entire pipeline. No module here is imported by it, scheduled by it, or
+> bundled into the Docker image — `tools/` is the first exclusion in
+> `.dockerignore`. Every script is run by hand from a laptop.
+>
+> Read this folder as the workbench around the pipeline, not the pipeline
+> itself: `validators/` vets prospective job boards *before* they are added to
+> `companies.yaml`, and `analysis/` explores data the pipeline has *already*
+> collected (over a strictly read-only database connection). Neither writes to
+> the warehouse or changes its schema.
 
 ---
 
@@ -27,8 +35,10 @@ python tools/validators/verify_ashby_tokens.py
 python tools/validators/verify_ashby_tokens.py --out tools/validators/new_ashby_companies.yaml
 ```
 
-Output YAML snippets (`new_companies.yaml`, `new_ashby_companies.yaml`) are also
-kept here for review before being merged into `companies.yaml`.
+Each run writes a YAML snippet (`new_companies.yaml`, `new_ashby_companies.yaml`)
+next to the script, to be eyeballed before its entries are merged into
+`companies.yaml`. Those two files are generated output and are gitignored —
+`companies.yaml` is the committed source of truth for which boards are scraped.
 
 ---
 

@@ -1,4 +1,4 @@
-# analysis/
+# tools/analysis/
 
 Ad-hoc, exploratory queries against the **JobPulse** Supabase database.
 
@@ -14,12 +14,12 @@ for marketing posts (ghost jobs, hiring trends, salary outliers, etc.).
 ## Layout
 
 ```
-analysis/
+tools/analysis/
 ├── README.md                         # this file
 ├── db.py                             # connection helper + CSV/MD writers
 ├── requirements.txt                  # extra deps for analysis only
 ├── run_all.py                        # run every query, build summary.md
-├── scratch.py                        # disposable one-off queries
+├── readme_stats.py                   # regenerate the root README's Volume table
 ├── ghost_jobs_by_inactivity.py
 ├── job_age_distribution.py
 ├── hiring_velocity_leaders.py
@@ -49,7 +49,7 @@ two files are written in addition to (not instead of) the dated
 Results are organized by date so re-running on a different day doesn't clobber
 yesterday's findings. The folder name is today's date (`YYYY-MM-DD`) by default;
 override with the `JOBPULSE_ANALYSIS_DATE` env var if you want to back-date a
-batch (e.g. `JOBPULSE_ANALYSIS_DATE=2026-04-01 python analysis/run_all.py`).
+batch (e.g. `JOBPULSE_ANALYSIS_DATE=2026-04-01 python tools/analysis/run_all.py`).
 A single `run_all.py` invocation pins one date for the whole batch, so every
 per-query script in that run lands in the same dated folder.
 
@@ -64,7 +64,7 @@ need to `source` it manually.
 ```bash
 # from the repo root
 python -m venv venv && source venv/bin/activate
-pip install -r analysis/requirements.txt
+pip install -r tools/analysis/requirements.txt
 ```
 
 If you already have the pipeline `requirements.txt` installed, you have
@@ -75,40 +75,35 @@ everything you need (psycopg2-binary + python-dotenv are already there).
 ### One query at a time
 
 ```bash
-python analysis/ghost_jobs_by_inactivity.py
+python tools/analysis/ghost_jobs_by_inactivity.py
 ```
 
 Each script:
 
 1. Prints a human-readable summary to stdout (headline numbers, top 10 rows).
-2. Writes the full result set to `analysis/results/<YYYY-MM-DD>/<query_name>.csv`.
-3. Writes a short `analysis/results/<YYYY-MM-DD>/<query_name>.md` with 3–8
+2. Writes the full result set to `tools/analysis/results/<YYYY-MM-DD>/<query_name>.csv`.
+3. Writes a short `tools/analysis/results/<YYYY-MM-DD>/<query_name>.md` with 3–8
    plain-English bullet points — the kind of findings worth quoting in a
    marketing post.
 
 ### Everything at once
 
 ```bash
-python analysis/run_all.py
+python tools/analysis/run_all.py
 ```
 
 This runs every analysis script in sequence into a single dated folder
-(`analysis/results/YYYY-MM-DD/`) and then writes:
+(`tools/analysis/results/YYYY-MM-DD/`) and then writes:
 
 - `summary.md` — every per-query markdown summary concatenated under clear
   headers, ready to paste into a Claude conversation.
 - `run_log.txt` — start/finish timestamps and any failures (so a broken
   script never gets silently skipped).
 
-### Scratch
-
-`scratch.py` is for disposable queries you'd otherwise type at a `psql`
-prompt. Edit it freely — it isn't run by `run_all.py`.
-
 ## Workflow with Claude
 
-1. Run `python analysis/run_all.py`.
-2. Open `analysis/results/<today>/summary.md` and skim the bullets.
+1. Run `python tools/analysis/run_all.py`.
+2. Open `tools/analysis/results/<today>/summary.md` and skim the bullets.
 3. Drag interesting CSVs (or the whole dated folder) into a Claude chat
    for deeper analysis and angle-finding.
 
