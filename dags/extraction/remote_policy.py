@@ -1,12 +1,9 @@
 """Extract remote work policy from job description text and location."""
 
 import re
-import logging
 from typing import Optional
 
 from extraction import strip_html
-
-logger = logging.getLogger(__name__)
 
 _NUM = r"(?:\d|one|two|three|four|five|six|seven)"
 

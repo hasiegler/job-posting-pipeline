@@ -4,7 +4,7 @@ Helper functions for inserting/modifying data in Supabase tables.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 from psycopg2.extras import execute_values, Json

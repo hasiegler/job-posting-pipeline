@@ -4,20 +4,15 @@ Scrape Ashby job boards via the public posting API.
 Endpoint pattern:
     https://api.ashbyhq.com/posting-api/job-board/{board_token}?includeCompensation=true
 
-The Ashby API differs from Greenhouse in three important ways that this module
-absorbs so the downstream pipeline can stay scraper-agnostic:
-
-* Locations are split into a primary `location` plus an array of
-  `secondaryLocations`; we concatenate them with "; " for a single column.
-* Remote-policy comes from the `workplaceType` field (Remote/Hybrid/OnSite).
-  We map OnSite -> "On-Site" so it matches the canonical string Greenhouse
-  uses (referenced by `company_stats.remote_policy = 'On-Site'`).
-* Salary is provided directly on the posting under `compensation` and is
-  treated as the source of truth for Ashby jobs.  Description-text salary
-  extraction is intentionally skipped downstream.
+This module only fetches and guards: it stores raw Ashby posting objects
+verbatim so the pristine payload lands in S3.  The Ashby-vs-Greenhouse shape
+differences (concatenating `location` with `secondaryLocations`, mapping
+`workplaceType` OnSite -> "On-Site", and reading salary off `compensation`)
+are reconciled downstream by `normalize_ashby` in
+`datawarehouse/data_modification.py`, which is what lets the rest of the
+pipeline stay scraper-agnostic.
 """
 
-import logging
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -26,18 +21,7 @@ import requests
 from alerting import send_alert
 from datawarehouse.data_utils import run_with_db
 
-logger = logging.getLogger(__name__)
-
 ASHBY_API_BASE = "https://api.ashbyhq.com/posting-api/job-board"
-
-# Greenhouse uses "On-Site" (hyphenated); Ashby returns "OnSite" (one word).
-# Keep the existing canonical strings so analytics SQL and any downstream
-# consumers stay unchanged.
-_WORKPLACE_TYPE_MAP = {
-    "Remote": "Remote",
-    "Hybrid": "Hybrid",
-    "OnSite": "On-Site",
-}
 
 # Completeness-guard threshold.  BOTH trip rules below only fire when a
 # company's baseline is at least this many jobs.  Small boards are noisy: a
@@ -97,60 +81,6 @@ def extract_board_token(url: str) -> str:
     """
     path = urlparse(url).path.rstrip("/")
     return path.split("/")[-1]
-
-
-def _combine_locations(job: dict) -> Optional[str]:
-    """Concatenate primary `location` and `secondaryLocations[].location` with '; '."""
-    primary = job.get("location")
-    secondary = [
-        loc.get("location")
-        for loc in (job.get("secondaryLocations") or [])
-        if loc.get("location")
-    ]
-    parts = [p for p in [primary, *secondary] if p]
-    return "; ".join(parts) if parts else None
-
-
-def _extract_salary(compensation: Optional[dict]) -> dict:
-    """Pick a single Salary component out of `compensation.summaryComponents`.
-
-    Walks the flat top-level `summaryComponents` list and returns the first
-    entry where `compensationType == "Salary"` and both min and max are
-    populated. Equity / EquityCashValue / EquityPercentage components are
-    ignored. Interval is mapped: "1 YEAR" -> "yearly", "1 HOUR" -> "hourly";
-    anything else leaves salary_period None.
-    """
-    empty = {
-        "salary_min": None,
-        "salary_max": None,
-        "salary_currency": None,
-        "salary_period": None,
-    }
-    if not compensation:
-        return empty
-
-    for comp in compensation.get("summaryComponents") or []:
-        if comp.get("compensationType") != "Salary":
-            continue
-        if comp.get("minValue") is None or comp.get("maxValue") is None:
-            continue
-
-        interval = (comp.get("interval") or "").upper()
-        if interval == "1 YEAR":
-            period: Optional[str] = "yearly"
-        elif interval == "1 HOUR":
-            period = "hourly"
-        else:
-            period = None
-
-        return {
-            "salary_min": comp.get("minValue"),
-            "salary_max": comp.get("maxValue"),
-            "salary_currency": comp.get("currencyCode"),
-            "salary_period": period,
-        }
-
-    return empty
 
 
 def scrape_ashby_jobs(company: dict) -> dict:

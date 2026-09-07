@@ -1,13 +1,10 @@
 """Extract salary information from job description text."""
 
 import re
-import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Optional
 
 from extraction import strip_html
-
-logger = logging.getLogger(__name__)
 
 CURRENCY_SYMBOLS = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY"}
 
@@ -25,9 +22,6 @@ class SalaryResult:
     salary_max: Optional[float] = None
     salary_currency: Optional[str] = None
     salary_period: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 _CODE_ALT = "|".join(CURRENCY_CODES)
