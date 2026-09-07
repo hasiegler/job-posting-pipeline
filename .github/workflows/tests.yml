@@ -1,0 +1,31 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the PYTHON_VERSION build arg in the dockerfile.
+          python-version: "3.12"
+
+      # No dependency install step: the extraction logic under test is pure
+      # stdlib, and the suite fakes the RealDictCursor rather than touching
+      # Postgres. Keeping CI dependency-free makes it fast and immune to
+      # upstream package breakage.
+      - name: Compile every tracked Python file
+        run: |
+          git ls-files '*.py' | xargs -n1 python -m py_compile
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: dags
+        run: python -m unittest discover -s tests -v
