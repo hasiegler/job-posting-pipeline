@@ -1,61 +1,16 @@
-asttokens==3.0.1
-attrs==25.4.0
-backcall==0.2.0
-beautifulsoup4==4.14.3
-bleach==6.3.0
-boto3==1.42.54
-botocore==1.42.54
-certifi==2026.1.4
-charset-normalizer==3.4.4
-decorator==5.2.1
-defusedxml==0.7.1
-docopt==0.6.2
-executing==2.2.1
-fastjsonschema==2.21.2
-idna==3.11
-ipython==8.12.3
-jedi==0.19.2
-Jinja2==3.1.6
-jmespath==1.1.0
-jsonschema==4.26.0
-jsonschema-specifications==2025.9.1
-jupyter_client==8.8.0
-jupyter_core==5.9.1
-jupyterlab_pygments==0.3.0
-MarkupSafe==3.0.3
-matplotlib-inline==0.2.1
-mistune==3.2.0
-nbclient==0.10.4
-nbconvert==7.17.0
-nbformat==5.10.4
-packaging==26.0
-pandocfilters==1.5.1
-parso==0.8.6
-pexpect==4.9.0
-pickleshare==0.7.5
-pipreqs==0.5.0
-platformdirs==4.9.1
-prompt_toolkit==3.0.52
-psycopg2-binary==2.9.11
-ptyprocess==0.7.0
-pure_eval==0.2.3
-Pygments==2.19.2
-python-dateutil==2.9.0.post0
-python-dotenv==1.2.1
-PyYAML==6.0.3
-pyzmq==27.1.0
-referencing==0.37.0
-requests==2.32.5
-rpds-py==0.30.0
-s3transfer==0.16.0
-six==1.17.0
-soupsieve==2.8.3
-stack-data==0.6.3
-tinycss2==1.4.0
-tornado==6.5.4
-traitlets==5.14.3
-typing_extensions==4.15.0
-urllib3==2.6.3
-wcwidth==0.6.0
-webencodings==0.5.1
-yarg==0.1.9
+# Runtime dependencies for the Airflow image (see dockerfile).
+#
+# Only direct imports of the pipeline code under dags/ belong here; pip
+# resolves the transitive tree, and Airflow's own constraints come from the
+# apache-airflow==<version> pin installed alongside this file.
+#
+# dbt is deliberately absent: it installs into an isolated venv from
+# dbt/requirements.txt so its dependency tree can't clash with Airflow's.
+# Local-only tooling under tools/ has its own tools/analysis/requirements.txt
+# and never ships in the image (see .dockerignore).
+
+beautifulsoup4==4.14.3   # HTML -> text for job descriptions (data_modification)
+boto3==1.42.54           # S3 raw-payload storage (data_loading, scrape_jobs)
+psycopg2-binary==2.9.11  # Postgres/Supabase driver (datawarehouse/*)
+PyYAML==6.0.3            # companies.yaml parsing (scrape_jobs, sync_companies)
+requests==2.32.5         # ATS APIs + Telegram alerting
