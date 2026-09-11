@@ -29,6 +29,7 @@ from datawarehouse.data_modification import (
     snapshot_changed_jobs,
     upsert_run_monitoring,
 )
+from api.board_guards import companies_to_force_close
 
 
 @task
@@ -55,9 +56,24 @@ def update_staging_jobs(s3_path: str | None) -> dict | None:
 
 
 @task
-def update_jobs_table() -> dict:
-    """Process all unprocessed staging_jobs rows into the jobs table."""
-    summary = run_with_db(process_staging_to_jobs)
+def update_jobs_table(
+    company_results: list[dict] | None = None,
+    board_outcomes: dict | None = None,
+) -> dict:
+    """Process all unprocessed staging_jobs rows into the jobs table.
+
+    ``company_results`` / ``board_outcomes`` identify boards that have no
+    staging rows this run but should still close leftover active jobs
+    (confirmed-empty scrape, or disabled after the 404 latch).
+    """
+    extra_close = companies_to_force_close(company_results, board_outcomes)
+    if extra_close:
+        print(f"  Force-close leftover jobs for: {extra_close}")
+    summary = run_with_db(
+        lambda conn, cur: process_staging_to_jobs(
+            conn, cur, extra_close_companies=extra_close
+        )
+    )
     print(f"  Jobs table updated: {summary}")
     return summary
 

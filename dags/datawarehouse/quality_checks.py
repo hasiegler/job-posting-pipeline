@@ -45,6 +45,7 @@ except ImportError:
         return {}
 
 from alerting import send_alert
+from api.board_guards import CONSECUTIVE_CONFIRMATION_DAYS
 from datawarehouse.data_utils import run_with_db
 
 logger = logging.getLogger(__name__)
@@ -168,12 +169,18 @@ def _check_scrape_failures(company_results: list[dict] | None) -> list[str]:
 def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
     cur.execute(
         """
-        SELECT company_id, scraped_jobs
-        FROM company_run_metrics WHERE dag_id = %s AND run_id = %s
+        SELECT crm.company_id, crm.scraped_jobs,
+               COALESCE(c.consecutive_zero_scrapes, 0) AS consecutive_zeros
+        FROM company_run_metrics crm
+        JOIN companies c ON c.company_id = crm.company_id
+        WHERE crm.dag_id = %s AND crm.run_id = %s
         """,
         (dag_id, run_id),
     )
-    current = {r["company_id"]: (r["scraped_jobs"] or 0) for r in cur.fetchall()}
+    current = {
+        r["company_id"]: (r["scraped_jobs"] or 0, r["consecutive_zeros"] or 0)
+        for r in cur.fetchall()
+    }
 
     # Trailing per-company baseline: last N successful (scraped_jobs > 0) runs,
     # excluding the current run.  Restrict to enabled companies — disabled
@@ -207,7 +214,11 @@ def _check_per_company(cur, dag_id: str, run_id: str) -> list[str]:
 
         name = b["company_name"]
         avg = float(b["avg_scraped"])
-        cur_scraped = current[company_id]
+        cur_scraped, consecutive_zeros = current[company_id]
+
+        if consecutive_zeros >= CONSECUTIVE_CONFIRMATION_DAYS:
+            # Confirmed-empty board: 0 jobs is the real state, not a regression.
+            continue
 
         if cur_scraped == 0:
             # Only flag a zero-job run when the baseline is substantial. For a
@@ -269,12 +280,16 @@ def _check_enabled_zero_jobs(cur) -> list[str]:
 
     Skips brand-new companies (those with no historical jobs at all) so a
     freshly added company that hasn't been scraped yet doesn't false-positive.
+    Also skips boards already latched as confirmed-empty (consecutive
+    zero scrapes at the confirmation threshold) — 0 active jobs is then
+    the real state, not a health problem.
     """
     cur.execute(
         """
         SELECT c.company_name
         FROM companies c
         WHERE c.enabled = TRUE
+          AND COALESCE(c.consecutive_zero_scrapes, 0) < %s
           AND NOT EXISTS (
               SELECT 1 FROM jobs j
               WHERE j.company_id = c.company_id AND j.is_active = TRUE
@@ -285,7 +300,8 @@ def _check_enabled_zero_jobs(cur) -> list[str]:
           )
         ORDER BY c.company_name
         LIMIT 20
-        """
+        """,
+        (CONSECUTIVE_CONFIRMATION_DAYS,),
     )
     rows = cur.fetchall()
     if not rows:

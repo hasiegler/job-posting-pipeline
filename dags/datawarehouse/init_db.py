@@ -22,6 +22,8 @@ def create_companies_table():
             base_url      TEXT NOT NULL,
             enabled       BOOLEAN NOT NULL DEFAULT TRUE,
             canonical_name TEXT,
+            consecutive_zero_scrapes INTEGER NOT NULL DEFAULT 0,
+            consecutive_permanent_failures INTEGER NOT NULL DEFAULT 0,
             created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );

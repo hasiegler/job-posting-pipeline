@@ -70,10 +70,9 @@ with DAG(
     all_companies = load_companies(COMPANIES_FILE)
     company_results = scrape_all_companies.expand(company=all_companies)
 
-    # Step 1b: For companies that hit a permanent failure (HTTP 404/401/403),
-    # flip them to enabled=false in companies.yaml so the next run's
-    # sync_companies disables them in the DB.  Runs in parallel with the
-    # rest of the pipeline — it just consumes scrape results.
+    # Step 1b: Update consecutive empty/404 counters. After 7 days of HTTP
+    # 404/401/403, flip enabled=false in companies.yaml AND the DB. Must
+    # finish before update_jobs_table so leftover jobs close in the same run.
     disable_dead = disable_dead_boards(company_results)
 
     # Step 2: Load from S3 into staging_jobs
@@ -84,8 +83,13 @@ with DAG(
         max_active_tis_per_dagrun=4,
     ).expand(s3_path=company_results.map(lambda r: r["s3_path"]))
 
-    # Step 3: Process staging into jobs table, mark closed jobs
-    jobs = update_jobs_table()
+    # Step 3: Process staging into jobs table, mark closed jobs.
+    # Waits for disable_dead_boards so 7-day-404 boards are in board_outcomes
+    # and their leftover active jobs close in the same run.
+    jobs = update_jobs_table(
+        company_results=company_results,
+        board_outcomes=disable_dead,
+    )
 
     # Step 4: Extract structured fields from descriptions
     extraction = extract_fields()
@@ -128,6 +132,7 @@ with DAG(
     # Dependencies
     sync >> all_companies
     staging >> jobs >> extraction >> history
+    disable_dead >> jobs
     history >> cleanup
     history >> analytics >> dbt_tests
     [cleanup, analytics] >> finalize_metrics

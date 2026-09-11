@@ -33,6 +33,15 @@ def sync_companies(path: str = COMPANIES_FILE) -> dict:
 
     conn, cur = get_conn_cursor()
 
+    cur.execute(
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS "
+        "consecutive_zero_scrapes INTEGER NOT NULL DEFAULT 0"
+    )
+    cur.execute(
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS "
+        "consecutive_permanent_failures INTEGER NOT NULL DEFAULT 0"
+    )
+
     # Fetch all existing companies in a single query
     cur.execute(
         "SELECT company_name, scraper_type, base_url, enabled, canonical_name "

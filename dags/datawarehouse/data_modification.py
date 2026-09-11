@@ -515,7 +515,9 @@ NORMALIZERS = {
 }
 
 
-def process_staging_to_jobs(conn, cur) -> dict:
+def process_staging_to_jobs(
+    conn, cur, extra_close_companies: list[str] | None = None
+) -> dict:
     """Process all unprocessed staging_jobs rows into the jobs table.
 
     Memory-conscious design for a 2 GB droplet: a single `SELECT * FROM
@@ -533,6 +535,11 @@ def process_staging_to_jobs(conn, cur) -> dict:
          sees description_html columns from both sides at once.
       4–8. Bulk INSERT / UPDATE / close-detect, all set-based SQL on the
          server, then mark every staging row processed in one statement.
+
+    ``extra_close_companies`` are boards with no staging rows this run that
+    should still go through close detection: a confirmed-empty scrape
+    (0 jobs written) or a board just disabled after the 404 latch.  Without
+    this, leftover ``is_active`` rows would stay open forever.
     """
     # -- Phase 0: discover companies with unprocessed staging rows -------
     cur.execute("""
@@ -545,7 +552,19 @@ def process_staging_to_jobs(conn, cur) -> dict:
         (r["company_id"], r["scraper_type"]) for r in cur.fetchall()
     ]
 
-    if not company_pairs:
+    extra_pairs: list[tuple[int, str]] = []
+    if extra_close_companies:
+        cur.execute(
+            """
+            SELECT company_id, scraper_type
+            FROM companies
+            WHERE company_name = ANY(%s)
+            """,
+            (list(extra_close_companies),),
+        )
+        extra_pairs = [(r["company_id"], r["scraper_type"]) for r in cur.fetchall()]
+
+    if not company_pairs and not extra_pairs:
         logger.info("No unprocessed staging rows found.")
         return {
             "inserted": 0,
@@ -559,8 +578,14 @@ def process_staging_to_jobs(conn, cur) -> dict:
     company_metrics: dict[int, dict] = {
         cid: _empty_company_metrics() for cid, _ in company_pairs
     }
-    companies_seen: set[tuple[int, str]] = set(company_pairs)
+    for cid, _ in extra_pairs:
+        company_metrics.setdefault(cid, _empty_company_metrics())
+    companies_seen: set[tuple[int, str]] = set(company_pairs) | set(extra_pairs)
     all_staging_ids: list[int] = []
+    inserted = 0
+    changed_job_ids: list[int] = []
+    unchanged_job_ids: list[int] = []
+    changed_jobs: list[dict] = []
 
     # -- Create the _norm temp table once for the whole transaction -----
     # salary_* and remote_policy travel through _norm so ATSes that expose

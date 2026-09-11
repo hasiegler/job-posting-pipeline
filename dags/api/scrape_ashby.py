@@ -19,16 +19,15 @@ from urllib.parse import urlparse
 import requests
 
 from alerting import send_alert
+from api.board_guards import (
+    CONSECUTIVE_CONFIRMATION_DAYS,
+    MIN_BASELINE_FOR_GUARD,
+    AshbyGuardTrip,
+    should_trip_zero_floor,
+)
 from datawarehouse.data_utils import run_with_db
 
 ASHBY_API_BASE = "https://api.ashbyhq.com/posting-api/job-board"
-
-# Completeness-guard threshold.  BOTH trip rules below only fire when a
-# company's baseline is at least this many jobs.  Small boards are noisy: a
-# baseline of a handful of jobs legitimately going to 0 (nothing currently
-# open) must NOT be treated as a bad scrape, so we never skip the run for them.
-# A board with a substantial baseline (e.g. 70) dropping to 0 still trips.
-MIN_BASELINE_FOR_GUARD = 10
 
 
 def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
@@ -74,6 +73,31 @@ def _get_baseline_scraped_jobs(company_name: str) -> Optional[int]:
     return run_with_db(_q)
 
 
+def _get_consecutive_zero_scrapes(company_name: str) -> int:
+    """Return ``companies.consecutive_zero_scrapes``, or 0 if unknown.
+
+    ``sync_companies`` adds the column at the start of every DAG run, so it
+    is present by the time a scrape task runs.  Missing-column / missing-row
+    failures fall back to 0, which preserves the old skip-on-zero behavior.
+    """
+    def _q(conn, cur):
+        cur.execute(
+            """
+            SELECT consecutive_zero_scrapes
+            FROM companies
+            WHERE company_name = %s
+            """,
+            (company_name,),
+        )
+        row = cur.fetchone()
+        return int(row["consecutive_zero_scrapes"]) if row else 0
+
+    try:
+        return run_with_db(_q)
+    except Exception:  # noqa: BLE001 — fail closed (keep skipping zeros)
+        return 0
+
+
 def extract_board_token(url: str) -> str:
     """Extract the board token (last path segment) from an Ashby board URL.
 
@@ -114,39 +138,57 @@ def scrape_ashby_jobs(company: dict) -> dict:
     # regression heuristic instead: compare today's count to this company's
     # most recent successful scrape and trip on a hard zero-floor or a >50%
     # drop.  Both rules are gated behind MIN_BASELINE_FOR_GUARD so small,
-    # noisy boards are never skipped for a legitimate 0.  Trip routes through
-    # the same RuntimeError → "transient" sentinel path the Greenhouse
-    # meta.total guard uses, so the board is skipped this run only — no S3
-    # write, no staging insert, no auto-disable.
+    # noisy boards are never skipped for a legitimate 0.
+    #
+    # Zero-floor trips skip the board (no S3 write, no close) until the same
+    # HTTP 200 + 0 jobs condition has held for CONSECUTIVE_CONFIRMATION_DAYS.
+    # After that the empty payload is accepted as real so leftover jobs close,
+    # but the board stays enabled.  Baseline queries filter scraped_jobs > 0,
+    # so accepted zeros never become the new baseline.
     today_count = len(jobs)
     baseline = _get_baseline_scraped_jobs(company["name"])
+    consecutive_zeros = (
+        _get_consecutive_zero_scrapes(company["name"]) if today_count == 0 else 0
+    )
 
+    if should_trip_zero_floor(today_count, baseline, consecutive_zeros):
+        send_alert(
+            f"[Ashby] {company['name']}: zero-floor trip — fetched 0 jobs "
+            f"vs baseline={baseline} "
+            f"(day {consecutive_zeros + 1}/{CONSECUTIVE_CONFIRMATION_DAYS}). "
+            f"Skipping this run."
+        )
+        raise AshbyGuardTrip(
+            f"{company['name']}: Ashby completeness guard zero-floor "
+            f"(today_count=0, baseline={baseline}).",
+            skip_reason="zero_floor",
+        )
     if (
         today_count == 0
         and baseline is not None
         and baseline >= MIN_BASELINE_FOR_GUARD
+        and consecutive_zeros + 1 == CONSECUTIVE_CONFIRMATION_DAYS
     ):
         send_alert(
-            f"[Ashby] {company['name']}: zero-floor trip — fetched 0 jobs "
-            f"vs baseline={baseline}. Skipping this run."
-        )
-        raise RuntimeError(
-            f"{company['name']}: Ashby completeness guard zero-floor "
-            f"(today_count=0, baseline={baseline})."
+            f"[Ashby] {company['name']}: {CONSECUTIVE_CONFIRMATION_DAYS} "
+            f"consecutive empty scrapes vs baseline={baseline} — treating "
+            f"as a real empty board. Jobs will close; scraping continues."
         )
     if (
         baseline is not None
         and baseline >= MIN_BASELINE_FOR_GUARD
         and today_count < baseline * 0.5
+        and today_count != 0
     ):
         send_alert(
             f"[Ashby] {company['name']}: percentage-drop trip — fetched "
             f"{today_count} jobs vs baseline={baseline} (<50%). "
             f"Skipping this run."
         )
-        raise RuntimeError(
+        raise AshbyGuardTrip(
             f"{company['name']}: Ashby completeness guard percentage-drop "
-            f"(today_count={today_count}, baseline={baseline})."
+            f"(today_count={today_count}, baseline={baseline}).",
+            skip_reason="percentage_drop",
         )
 
     return {"company_name": company["name"], "jobs": jobs, "meta_total": None}

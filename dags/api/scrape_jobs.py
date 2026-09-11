@@ -15,6 +15,8 @@ import requests
 import yaml
 
 from alerting import send_alert
+from api.board_guards import CONSECUTIVE_CONFIRMATION_DAYS, AshbyGuardTrip, next_consecutive_counts
+from datawarehouse.data_utils import run_with_db
 
 try:
     from airflow.decorators import task
@@ -195,12 +197,20 @@ def check_completeness(company_name: str, jobs: list[dict], scraper_type: str = 
         )
 
 
-def _sentinel_result(company: dict, error_type: str, error: str) -> dict:
+def _sentinel_result(
+    company: dict,
+    error_type: str,
+    error: str,
+    skip_reason: str | None = None,
+) -> dict:
     """Return a result shape that downstream tasks treat as a skip.
 
     `error_type` is either:
-      - "permanent"  → `disable_dead_boards` will flip the YAML to enabled=false
+      - "permanent"  → counts toward the 7-day 404 latch in `disable_dead_boards`
       - "transient"  → skip this run only; next run retries
+
+    `skip_reason` distinguishes zero-floor skips (count toward the empty-board
+    latch) from other transients (which reset both counters).
 
     Shape mirrors the success-path summary (see `scrape_all_companies`) so
     downstream mapped tasks can read the same keys for every map index.
@@ -215,6 +225,7 @@ def _sentinel_result(company: dict, error_type: str, error: str) -> dict:
         "skipped": True,
         "error_type": error_type,
         "error": error,
+        "skip_reason": skip_reason,
     }
 
 
@@ -276,10 +287,10 @@ def scrape_all_companies(company: dict) -> dict:
 
     Any failure is captured here and returned as a sentinel result rather than
     raised, so one bad company doesn't fail the mapped task and cascade into
-    the rest of the pipeline. Permanent failures (HTTP 404 / 401 / 403) are
-    flagged so `disable_dead_boards` can flip them off in companies.yaml.
+    the rest of the pipeline.     Permanent failures (HTTP 404 / 401 / 403) count toward a 7-day latch;
+    `disable_dead_boards` flips YAML + DB off only after that streak.
     Transient failures (network, 5xx, partial responses, schema breaks, and
-    S3 write errors) are skipped only — the next run will retry.
+    S3 write errors) reset the latch and retry next run.
     """
     name = company.get("name", "unknown")
     scraper_type = company.get("scraper_type")
@@ -294,7 +305,8 @@ def scrape_all_companies(company: dict) -> dict:
             # rather than raising, so the rest of the run still completes.
             logger.error(f"{name}: unknown scraper_type '{scraper_type}'")
             return _sentinel_result(
-                company, "transient", f"unknown scraper_type '{scraper_type}'"
+                company, "transient", f"unknown scraper_type '{scraper_type}'",
+                skip_reason="unknown_scraper",
             )
 
         # Blocking completeness guard: raises RuntimeError (→ transient
@@ -312,32 +324,45 @@ def scrape_all_companies(company: dict) -> dict:
             "skipped": False,
             "error_type": None,
             "error": None,
+            "skip_reason": None,
         }
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status in (404, 401, 403):
             logger.error(
-                f"{name}: permanent failure HTTP {status} — will be auto-disabled "
-                f"in companies.yaml by disable_dead_boards."
+                f"{name}: permanent failure HTTP {status} — counts toward "
+                f"the {CONSECUTIVE_CONFIRMATION_DAYS}-day disable latch."
             )
-            return _sentinel_result(company, "permanent", f"HTTP {status}")
+            return _sentinel_result(
+                company, "permanent", f"HTTP {status}", skip_reason="permanent_http"
+            )
         logger.warning(
             f"{name}: transient HTTP {status}, skipping this run — will retry next run."
         )
-        return _sentinel_result(company, "transient", f"HTTP {status}")
+        return _sentinel_result(
+            company, "transient", f"HTTP {status}", skip_reason="transient_http"
+        )
     except (requests.ConnectionError, requests.Timeout) as e:
         logger.warning(
             f"{name}: transient network failure, skipping this run: "
             f"{e.__class__.__name__}"
         )
         return _sentinel_result(
-            company, "transient", f"network: {e.__class__.__name__}"
+            company, "transient", f"network: {e.__class__.__name__}",
+            skip_reason="network",
+        )
+    except AshbyGuardTrip as e:
+        logger.warning(f"{name}: Ashby guard trip, skipping this run: {e}")
+        return _sentinel_result(
+            company, "transient", str(e), skip_reason=e.skip_reason
         )
     except RuntimeError as e:
         # Includes the Greenhouse `meta.total` partial-response guard.
         # The board is fine — the response was truncated — so don't auto-disable.
         logger.warning(f"{name}: runtime failure, skipping this run: {e}")
-        return _sentinel_result(company, "transient", str(e))
+        return _sentinel_result(
+            company, "transient", str(e), skip_reason="runtime"
+        )
     except (ValueError, KeyError, json.JSONDecodeError) as e:
         # Schema break — log loudly because this likely affects every company
         # on the same ATS. Do NOT auto-disable; one of these would silently
@@ -346,14 +371,17 @@ def scrape_all_companies(company: dict) -> dict:
             f"{name}: SCHEMA BREAK ({e.__class__.__name__}: {e}) — "
             f"the ATS may have changed its API, investigate!"
         )
-        return _sentinel_result(company, "transient", f"schema break: {e}")
+        return _sentinel_result(
+            company, "transient", f"schema break: {e}", skip_reason="schema_break"
+        )
     except Exception as e:  # noqa: BLE001 — last-resort catch-all
         logger.error(
             f"{name}: unexpected error ({e.__class__.__name__}: {e}), "
             f"skipping this run."
         )
         return _sentinel_result(
-            company, "transient", f"{e.__class__.__name__}: {e}"
+            company, "transient", f"{e.__class__.__name__}: {e}",
+            skip_reason="unexpected",
         )
 
 
@@ -400,74 +428,139 @@ def _disable_in_yaml(yaml_path: str, company_names: list[str]) -> list[str]:
     return flipped
 
 
+def _ensure_latch_columns(cur) -> None:
+    cur.execute(
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS "
+        "consecutive_zero_scrapes INTEGER NOT NULL DEFAULT 0"
+    )
+    cur.execute(
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS "
+        "consecutive_permanent_failures INTEGER NOT NULL DEFAULT 0"
+    )
+
+
+def _apply_consecutive_counters(results: list[dict]) -> list[str]:
+    """Bump/reset latch counters from this run's scrape summaries.
+
+    Returns company names whose ``consecutive_permanent_failures`` is now
+    at or past ``CONSECUTIVE_CONFIRMATION_DAYS``.
+    """
+    def _fn(conn, cur):
+        _ensure_latch_columns(cur)
+        names = [r["company_name"] for r in results if r.get("company_name")]
+        if not names:
+            conn.commit()
+            return []
+        cur.execute(
+            """
+            SELECT company_name,
+                   consecutive_zero_scrapes,
+                   consecutive_permanent_failures
+            FROM companies
+            WHERE company_name = ANY(%s)
+            """,
+            (names,),
+        )
+        current = {row["company_name"]: dict(row) for row in cur.fetchall()}
+        latched: list[str] = []
+        for result in results:
+            name = result.get("company_name")
+            row = current.get(name)
+            if not row:
+                continue
+            zero, perm = next_consecutive_counts(
+                int(row["consecutive_zero_scrapes"] or 0),
+                int(row["consecutive_permanent_failures"] or 0),
+                result,
+            )
+            cur.execute(
+                """
+                UPDATE companies
+                SET consecutive_zero_scrapes = %s,
+                    consecutive_permanent_failures = %s,
+                    updated_at = NOW()
+                WHERE company_name = %s
+                """,
+                (zero, perm, name),
+            )
+            row["consecutive_zero_scrapes"] = zero
+            row["consecutive_permanent_failures"] = perm
+            if perm >= CONSECUTIVE_CONFIRMATION_DAYS:
+                latched.append(name)
+        conn.commit()
+        return latched
+
+    try:
+        return run_with_db(_fn)
+    except Exception as e:  # noqa: BLE001 — never fail the pipeline on counters
+        logger.warning("Could not update consecutive latch counters: %s", e)
+        return []
+
+
+def _disable_in_db(company_names: list[str]) -> list[str]:
+    """Set ``enabled = false`` in the companies table. Returns names updated."""
+    if not company_names:
+        return []
+
+    def _fn(conn, cur):
+        cur.execute(
+            """
+            UPDATE companies
+            SET enabled = FALSE, updated_at = NOW()
+            WHERE company_name = ANY(%s)
+            RETURNING company_name
+            """,
+            (company_names,),
+        )
+        rows = cur.fetchall()
+        conn.commit()
+        return [r["company_name"] for r in rows]
+
+    try:
+        return run_with_db(_fn)
+    except Exception as e:  # noqa: BLE001 — YAML disable can still proceed
+        logger.warning("Could not disable companies in DB: %s", e)
+        return []
+
+
 @task
 def disable_dead_boards(
     scrape_results: list[dict],
     yaml_path: str = COMPANIES_FILE,
 ) -> dict:
-    """Report permanently-failed companies and (best-effort) flip them to
-    `enabled: false` in companies.yaml.
+    """Update consecutive-run latches and disable boards after 7 days of 404s.
 
-    Reads the full list of `scrape_all_companies` mapped results and filters
-    for sentinels with `error_type == "permanent"` (HTTP 404/401/403).
+    Every scrape summary bumps or resets ``consecutive_zero_scrapes`` /
+    ``consecutive_permanent_failures`` on ``companies``. Only boards whose
+    permanent-failure streak has reached ``CONSECUTIVE_CONFIRMATION_DAYS``
+    are flipped to ``enabled: false`` — in companies.yaml *and* in the DB.
 
-    Behavior:
-      - If the YAML is writable, edit it in place. The next DAG run's
-        `sync_companies` step propagates `enabled = false` to Supabase.
-      - If the YAML is NOT writable (e.g. mounted read-only in Docker, or
-        the host file is root-owned), log a clear "MANUAL ACTION REQUIRED"
-        message listing the companies that need to be disabled. The task
-        still succeeds — we never want this task to fail the pipeline.
+    If the YAML is not writable, the DB is still disabled (so warehouse
+    views stop treating the board as live) and a MANUAL ACTION REQUIRED
+    alert lists the YAML edits. The task never fails the pipeline.
 
-    Transient failures (network, 5xx, partial responses, schema breaks) are
-    intentionally NOT acted on here: they'll retry on the next DAG run.
+    Transient failures reset both counters and are not disabled.
     """
+    results = [r for r in (scrape_results or []) if isinstance(r, dict)]
+    latched_names = _apply_consecutive_counters(results)
+    latched_set = set(latched_names)
+
     permanent = [
-        r for r in (scrape_results or [])
-        if isinstance(r, dict)
-        and r.get("skipped")
-        and r.get("error_type") == "permanent"
+        r for r in results
+        if r.get("skipped") and r.get("error_type") == "permanent"
     ]
+    to_disable = [r for r in permanent if r.get("company_name") in latched_set]
+    names = [r["company_name"] for r in to_disable]
 
-    if not permanent:
-        print("  No permanent scrape failures — nothing to disable.")
-        return {"disabled": [], "permanent_failures": [], "yaml_write_ok": True}
+    if permanent:
+        print(f"  {len(permanent)} permanent failure(s) this run:")
+        for r in permanent:
+            print(f"    - {r['company_name']}: {r.get('error', '(no detail)')}")
 
-    names = [r["company_name"] for r in permanent]
-
-    print(f"  {len(permanent)} permanent failure(s) detected:")
-    for r in permanent:
-        print(f"    - {r['company_name']}: {r.get('error', '(no detail)')}")
-
-    try:
-        flipped = _disable_in_yaml(yaml_path, names)
-    except OSError as e:
-        # Most common cause: companies.yaml is read-only inside the Airflow
-        # container (root-owned host file or read-only bind mount). Don't
-        # fail the task — surface a clear actionable message instead.
-        logger.warning(
-            f"Could not write to {yaml_path} ({e.__class__.__name__}: {e}). "
-            f"MANUAL ACTION REQUIRED: edit companies.yaml and set "
-            f"`enabled: false` for: {names}"
-        )
-        print("")
-        print("  >>> YAML write failed — MANUAL ACTION REQUIRED <<<")
-        print(f"  Reason: {e.__class__.__name__}: {e}")
-        print("  Edit companies.yaml and set `enabled: false` for:")
-        for n in names:
-            print(f"      - {n}")
+    if not names:
         print(
-            "  (To enable auto-disable in the future, make companies.yaml "
-            "writable by the Airflow worker, e.g. `chmod 666 companies.yaml`)"
-        )
-        detail = "\n".join(
-            f"  {r['company_name']}: {r.get('error', '?')}" for r in permanent
-        )
-        send_alert(
-            f"[DEAD BOARD — MANUAL ACTION REQUIRED] "
-            f"{len(permanent)} board(s) returned HTTP 404/401/403 but "
-            f"companies.yaml could not be updated ({e.__class__.__name__}). "
-            f"Set enabled: false manually for:\n{detail}"
+            "  No boards past the "
+            f"{CONSECUTIVE_CONFIRMATION_DAYS}-day 404 latch — nothing to disable."
         )
         return {
             "disabled": [],
@@ -475,35 +568,77 @@ def disable_dead_boards(
                 {"company_name": r["company_name"], "error": r.get("error")}
                 for r in permanent
             ],
-            "yaml_write_ok": False,
-            "yaml_write_error": f"{e.__class__.__name__}: {e}",
+            "yaml_write_ok": True,
         }
 
-    flipped_set = set(flipped)
-    print("  YAML edit successful:")
-    for r in permanent:
-        cname = r["company_name"]
-        marker = "disabled in YAML" if cname in flipped_set else "already disabled"
-        print(f"    [{marker}] {cname}")
+    print(
+        f"  {len(names)} board(s) failed HTTP 404/401/403 for "
+        f"{CONSECUTIVE_CONFIRMATION_DAYS} consecutive runs — disabling:"
+    )
+    for n in names:
+        print(f"    - {n}")
 
-    if flipped:
+    db_disabled = _disable_in_db(names)
+    print(f"  DB enabled=false: {db_disabled or '(none)'}")
+
+    yaml_write_ok = True
+    yaml_write_error = None
+    flipped: list[str] = []
+    try:
+        flipped = _disable_in_yaml(yaml_path, names)
+    except OSError as e:
+        yaml_write_ok = False
+        yaml_write_error = f"{e.__class__.__name__}: {e}"
+        logger.warning(
+            f"Could not write to {yaml_path} ({yaml_write_error}). "
+            f"DB was disabled; MANUAL ACTION REQUIRED for YAML: {names}"
+        )
+        print("")
+        print("  >>> YAML write failed — MANUAL ACTION REQUIRED <<<")
+        print(f"  Reason: {yaml_write_error}")
+        print("  Edit companies.yaml and set `enabled: false` for:")
+        for n in names:
+            print(f"      - {n}")
+        print(
+            "  (containers should run as AIRFLOW_UID so the bind-mounted "
+            "companies.yaml is writable; see docker-compose.yaml)"
+        )
         detail = "\n".join(
-            f"  {r['company_name']}: {r.get('error', '?')}" for r in permanent
-            if r["company_name"] in flipped_set
+            f"  {r['company_name']}: {r.get('error', '?')}" for r in to_disable
+        )
+        send_alert(
+            f"[DEAD BOARD — MANUAL ACTION REQUIRED] "
+            f"{len(names)} board(s) hit HTTP 404/401/403 for "
+            f"{CONSECUTIVE_CONFIRMATION_DAYS} consecutive runs. "
+            f"DB enabled=false was set, but companies.yaml could not be "
+            f"updated ({e.__class__.__name__}). Set enabled: false in YAML "
+            f"or the next sync will re-enable them:\n{detail}"
+        )
+    else:
+        flipped_set = set(flipped)
+        print("  YAML edit:")
+        for n in names:
+            marker = "disabled in YAML" if n in flipped_set else "already disabled"
+            print(f"    [{marker}] {n}")
+        detail = "\n".join(
+            f"  {r['company_name']}: {r.get('error', '?')}" for r in to_disable
         )
         send_alert(
             f"[DEAD BOARD DISABLED] "
-            f"{len(flipped)} board(s) auto-disabled in companies.yaml "
-            f"(HTTP 404/401/403 — will be removed from next run):\n{detail}"
+            f"{len(names)} board(s) auto-disabled in companies.yaml and the "
+            f"DB after {CONSECUTIVE_CONFIRMATION_DAYS} consecutive "
+            f"HTTP 404/401/403. Leftover jobs will close this run:\n{detail}"
         )
 
     return {
-        "disabled": flipped,
+        "disabled": names,
         "permanent_failures": [
             {"company_name": r["company_name"], "error": r.get("error")}
             for r in permanent
         ],
-        "yaml_write_ok": True,
+        "yaml_write_ok": yaml_write_ok,
+        "yaml_write_error": yaml_write_error,
+        "db_disabled": db_disabled,
     }
 
 

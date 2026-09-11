@@ -59,6 +59,10 @@ sources:
             description: "Unique company name."
           - name: enabled
             description: "Whether the company is currently scraped/active."
+          - name: consecutive_zero_scrapes
+            description: "Streak of HTTP 200 empty scrapes; at 7 the empty board is accepted."
+          - name: consecutive_permanent_failures
+            description: "Streak of HTTP 404/401/403; at 7 the board is disabled."
 
       - name: company_run_metrics
         description: >
