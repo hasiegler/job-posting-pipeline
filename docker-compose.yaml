@@ -1,6 +1,10 @@
 x-airflow-common: &airflow-common
   build: .
   env_file: .env
+  # Match the host UID so bind-mounted companies.yaml (and logs/output) are
+  # writable. AIRFLOW_UID is set in .env; the :0 group is the Airflow image's
+  # documented pattern so /opt/airflow stays writable.
+  user: "${AIRFLOW_UID:-1000}:0"
   environment:
     &airflow-common-env
     AIRFLOW_CONN_SUPABASE_DB: 'postgresql://${SUPABASE_USER}:${SUPABASE_PASSWORD}@${SUPABASE_HOST}:${SUPABASE_PORT}/${SUPABASE_DB}?sslmode=require'
@@ -46,6 +50,7 @@ services:
     command:
       - -c
       - |
+        chmod u+w /opt/airflow/companies.yaml 2>/dev/null || true
         airflow db migrate
         airflow users create \
           --username $${_AIRFLOW_WWW_USER_USERNAME} \
